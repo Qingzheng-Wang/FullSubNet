@@ -2,7 +2,7 @@ import importlib
 import os
 import time
 from typing import Optional
-
+import pdb
 import torch
 
 
@@ -31,8 +31,8 @@ def load_checkpoint(checkpoint_path, device):
 
 
 def prepare_empty_dir(dirs, resume=False):
-    """If resume the experiment, assert the dirs exist. If not the resume experiment, set up new dirs.
-
+    """
+    If resume the experiment, assert the dirs exist. If not the resume experiment, set up new dirs.
     Args:
         dirs (list): directors list
         resume (bool): whether to resume experiment, default is False
@@ -163,7 +163,9 @@ def prepare_device(n_gpu: int, keep_reproducibility=False):
 
 
 def expand_path(path):
-    return os.path.abspath(os.path.expanduser(path))
+    # expand user将路径中包含的"~"和"~user"转换成用户目录， abs path将路径转换成绝对路径
+    t = os.path.abspath(os.path.expanduser(path))
+    return t
 
 
 def basename(path):

@@ -3,7 +3,7 @@ import os
 import random
 import sys
 from pathlib import Path
-
+import pdb
 import numpy as np
 import toml
 import torch
@@ -24,8 +24,12 @@ def entry(rank, config, resume, only_validation):
     torch.cuda.set_device(rank)
 
     # Initialize the process group
-    # The environment variables necessary to initialize a Torch process group are provided to you by this module,
+    # The environment variables necessary to
+    # initialize a Torch process group are
+    # provided to you by this module,
     # and no need for you to pass ``RANK`` manually.
+    # nccl: NVIDIA Collective Communication Library是
+    # NVIDIA开发的多GPU通信库，用于多GPU间的数据交换和通信
     torch.distributed.init_process_group(backend="nccl")
     print(f"Process {rank + 1} initialized.")
 
@@ -76,14 +80,17 @@ def entry(rank, config, resume, only_validation):
         train_dataloader=train_dataloader,
         validation_dataloader=valid_dataloader,
     )
-
     trainer.train()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="FullSubNet")
     parser.add_argument(
-        "-C", "--configuration", required=True, type=str, help="Configuration (*.toml)."
+        "-C",
+        "--configuration",
+        required=True,
+        type=str,
+        help="Configuration (*.toml)."
     )
     parser.add_argument(
         "-R",
@@ -98,9 +105,13 @@ if __name__ == "__main__":
         help="Only run validation, which is used for debugging.",
     )
     parser.add_argument(
-        "-P", "--preloaded_model_path", type=str, help="Path of the *.pth file of a model."
+        "-P",
+        "--preloaded_model_path",
+        type=str,
+        help="Path of the *.pth file of a model."
     )
     args = parser.parse_args()
+
 
     local_rank = int(os.environ["LOCAL_RANK"])
 
@@ -119,5 +130,6 @@ if __name__ == "__main__":
     )
     configuration["meta"]["config_path"] = args.configuration
     configuration["meta"]["preloaded_model_path"] = args.preloaded_model_path
-
+    device_id = torch.cuda.current_device()
+    print(f"\033[31m{device_id}\033[0m")
     entry(local_rank, configuration, args.resume, args.only_validation)

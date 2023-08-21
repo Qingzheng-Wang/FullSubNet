@@ -88,7 +88,7 @@ class Model(BaseModel):
             num_channels == 1
         ), f"{self.__class__.__name__} takes the mag feature as inputs."
 
-        # Fullband model
+        # Full-band model
         fb_input = self.norm(noisy_mag).reshape(
             batch_size, num_channels * num_freqs, num_frames
         )

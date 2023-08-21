@@ -15,6 +15,7 @@ from rich.console import Console
 from torch.cuda.amp import GradScaler
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.tensorboard import SummaryWriter
+from torch.backends import cudnn
 
 import audio_zen.metrics as metrics
 from audio_zen.acoustics.feature import istft, stft
@@ -37,11 +38,12 @@ class BaseTrainer:
         self.dist = dist
         self.rank = rank
 
-        torch.backends.cudnn.enabled = config["meta"]["cudnn_enable"]
+        # cudnn可以加速训练，但是会消耗更多的内存
+        cudnn.enabled = config["meta"]["cudnn_enable"]
         # torch.backends.cudnn.deterministic = True
         # torch.backends.cudnn.benchmark = False
 
-        # Automatic mixed precision (AMP)
+        # Automatic Mixed Precision (AMP)
         self.use_amp = config["meta"]["use_amp"]
         self.scaler = GradScaler(enabled=self.use_amp)
 
@@ -52,6 +54,7 @@ class BaseTrainer:
         win_length = self.acoustic_config["win_length"]
 
         # Supported STFT
+        # 固定一个函数的部分参数,返回一个新的可调用对象。
         self.torch_stft = partial(
             stft, n_fft=n_fft, hop_length=hop_length, win_length=win_length
         )
@@ -91,7 +94,7 @@ class BaseTrainer:
         self.save_dir = (
             Path(config["meta"]["save_dir"]).expanduser().absolute()
             / config["meta"]["experiment_name"]
-        )
+        ) # Path对象可以后面跟/然后加上字符串，这样就可以拼接路径了
         self.checkpoints_dir = self.save_dir / "checkpoints"
         self.logs_dir = self.save_dir / "logs"
         self.source_code_dir = Path(__file__).expanduser().absolute().parent.parent.parent
@@ -105,6 +108,7 @@ class BaseTrainer:
         if config["meta"]["preloaded_model_path"]:
             self._preload_model(Path(config["preloaded_model_path"]))
 
+        # Prepare empty directories for saving checkpoints and logs
         if self.rank == 0:
             prepare_empty_dir([self.checkpoints_dir, self.logs_dir], resume=resume)
 
@@ -179,6 +183,7 @@ class BaseTrainer:
         self.optimizer.load_state_dict(checkpoint["optimizer"])
         self.scaler.load_state_dict(checkpoint["scaler"])
 
+        # 判断model是否是DistibutedDataParallel的一个对象(实例)
         if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
             self.model.module.load_state_dict(checkpoint["model"])
         else:
@@ -212,6 +217,7 @@ class BaseTrainer:
             "scaler": self.scaler.state_dict(),
         }
 
+        # 兼顾了单卡和多卡的情况
         if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
             state_dict["model"] = self.model.module.state_dict()
         else:
@@ -271,6 +277,11 @@ class BaseTrainer:
     def _set_models_to_train_mode(self):
         self.model.train()
 
+    # 在评估模型指标如loss、accuracy之前,
+    # 需要使用model.eval()把模型切换到评估模式,
+    # 得到较为准确地模型预测效果, eval mode下的模型将不会计算梯度,
+    # BatchNorm和Dropout等层不起作用,
+    # 这样可以加速模型评估推理过程, 同时也不会占用GPU显存.
     def _set_models_to_eval_mode(self):
         self.model.eval()
 
@@ -328,7 +339,7 @@ class BaseTrainer:
         Notes:
             1. You can register other metrics, but STOI and WB_PESQ metrics must be existence. These two metrics are
              used for checking if the current epoch is a "best epoch."
-            2. If you want to use a new metric, you must register it in "utile.
+            2. If you want to use a new metric, you must register it in util.
         """
         assert (
             "STOI" in metrics_list and "WB_PESQ" in metrics_list

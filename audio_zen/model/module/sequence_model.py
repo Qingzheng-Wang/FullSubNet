@@ -111,6 +111,7 @@ class SequenceModel(nn.Module):
             [B, F, T]
         """
         assert x.dim() == 3, f"The shape of input is {x.shape}."
+        # 调用flatten_parameters让parameter的数据存放成contiguous chunk(连续的块)
         self.sequence_model.flatten_parameters()
 
         x = x.permute(0, 2, 1)  # [B, F, T] => [B, T, F]

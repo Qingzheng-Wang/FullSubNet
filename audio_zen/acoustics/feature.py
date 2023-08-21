@@ -65,15 +65,13 @@ def istft(features, n_fft, hop_length, win_length, length=None, input_type="comp
         single-channel speech of shape [B, T]
     """
     if input_type == "real_imag":
-        # the feature is (real, imag) or [real, imag]
-        assert isinstance(features, tuple) or isinstance(features, list)
+        assert isinstance(features, tuple) or isinstance(features, list), "Features must be a tuple or list."
         real, imag = features
         features = torch.complex(real, imag)
     elif input_type == "complex":
-        assert torch.is_complex(features), "The input feature is not complex."
+        assert torch.is_complex(features), "Features must be complex-valued."
     elif input_type == "mag_phase":
-        # the feature is (mag, phase) or [mag, phase]
-        assert isinstance(features, tuple) or isinstance(features, list)
+        assert isinstance(features, tuple) or isinstance(features, list), "Features must be a tuple or list."
         mag, phase = features
         features = torch.complex(mag * torch.cos(phase), mag * torch.sin(phase))
     else:
@@ -104,14 +102,15 @@ def norm_amplitude(y, scalar=None, eps=1e-6):
 
 
 def tailor_dB_FS(y, target_dB_FS=-25, eps=1e-6):
-    rms = np.sqrt(np.mean(y**2))
-    scalar = 10 ** (target_dB_FS / 20) / (rms + eps)
-    y *= scalar
-    return y, rms, scalar
+    # dB = 20 * log10(x / x_ref)
+    rms = np.sqrt(np.mean(y**2)) # rms is the root-mean-square of the signal
+    scalar = 10 ** (target_dB_FS / 20) / (rms + eps) # compute 1 / x_ref
+    y *= scalar # normalize use x_ref
+    return y, rms, scalar # return normalized y
 
 
 def is_clipped(y, clipping_threshold=0.999):
-    return any(np.abs(y) > clipping_threshold)
+    return any(np.abs(y) > clipping_threshold) # any() return True if any element of the iterable is true. If not, return False.
 
 
 def load_wav(file, sr=16000):
@@ -158,6 +157,7 @@ def subsample(
         data: **one-dimensional data**
         sub_sample_length: how long
         start_position: If start index smaller than 0, randomly generate one index
+        return_start_position: add start position return or not
 
     """
     assert np.ndim(data) == 1, f"Only support 1D data. The dim is {np.ndim(data)}"

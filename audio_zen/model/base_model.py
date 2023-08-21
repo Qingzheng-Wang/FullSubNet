@@ -12,11 +12,11 @@ class BaseModel(nn.Module):
 
     @staticmethod
     def freq_unfold(input, num_neighbors):
-        """Split the overlapped subband units along the frequency axis.
+        """Split the overlapped sub-band units along the frequency axis.
 
         Args:
             input: four-dimension input with the shape [B, C, F, T]
-            num_neighbors: number of neighbors in each side for each subband unit.
+            num_neighbors: number of neighbors in each side for each sub-band unit, [{N-1}, f, {N-1}]
 
         Returns:
             Overlapped sub-band units specified as [B, N, C, F_s, T], where `F_s` represents the frequency axis of
@@ -32,10 +32,10 @@ class BaseModel(nn.Module):
         sub_band_unit_size = num_neighbors * 2 + 1
 
         # Pad the top and bottom of the original spectrogram
-        output = functional.pad(output, [0, 0, num_neighbors, num_neighbors], mode="reflect")  # [B * C, 1, F, T]
+        output = functional.pad(output, [0, 0, num_neighbors, num_neighbors], mode="reflect")  # [B * C, 1, F, T] => [B * C, 1, F + 2 * N, T]
 
         # Unfold the spectrogram into sub-band units
-        # [B * C, 1, F, T] => [B * C, sub_band_unit_size, num_frames, N], N is equal to the number of frequencies.
+        # [B * C, 1, F + 2 * N, T] => [B * C, (2N + 1) * T, F], N is equal to the number of frequencies.
         output = functional.unfold(output, kernel_size=(sub_band_unit_size, num_frames))  # move on the F and T axes
         assert output.shape[-1] == num_freqs, f"n_freqs != N (sub_band), {num_freqs} != {output.shape[-1]}"
 
@@ -437,3 +437,10 @@ class BaseModel(nn.Module):
                     init.orthogonal_(param.data)
                 else:
                     init.normal_(param.data)
+
+
+if __name__ == "__main__":
+    x = torch.rand([4, 3, 12, 5])
+    b = BaseModel()
+    y = b.freq_unfold(x, 3)
+    print(y.shape)

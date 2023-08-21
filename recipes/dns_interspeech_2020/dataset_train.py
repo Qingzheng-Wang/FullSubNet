@@ -14,7 +14,10 @@ from audio_zen.acoustics.feature import (
 )
 from audio_zen.dataset.base_dataset import BaseDataset
 from audio_zen.utils import expand_path
+import pdb
 
+
+# 整个dataset处理数据是在CPU上进行的
 
 class Dataset(BaseDataset):
     def __init__(
@@ -40,6 +43,7 @@ class Dataset(BaseDataset):
         pre_load_rir,
         num_workers,
     ):
+
         """Dynamic generate mixing data for training"""
         super().__init__()
         # acoustics args
@@ -47,15 +51,14 @@ class Dataset(BaseDataset):
 
         # parallel args
         self.num_workers = num_workers
-
         clean_dataset_list = [
-            line.rstrip("\n") for line in open(expand_path(clean_dataset), "r")
+            expand_path(line).rstrip("\n") for line in open(expand_path(clean_dataset), "r")
         ]
         noise_dataset_list = [
-            line.rstrip("\n") for line in open(expand_path(noise_dataset), "r")
+            expand_path(line).rstrip("\n") for line in open(expand_path(noise_dataset), "r")
         ]
         rir_dataset_list = [
-            line.rstrip("\n") for line in open(expand_path(rir_dataset), "r")
+            expand_path(line).rstrip("\n") for line in open(expand_path(rir_dataset), "r")
         ]
 
         clean_dataset_list = self._offset_and_limit(
@@ -79,7 +82,9 @@ class Dataset(BaseDataset):
             )
 
         if pre_load_rir:
-            rir_dataset_list = self._preload_dataset(rir_dataset_list, remark="RIR Dataset")
+            rir_dataset_list = self._preload_dataset(
+                rir_dataset_list, remark="RIR Dataset"
+            )
 
         self.clean_dataset_list = clean_dataset_list
         self.noise_dataset_list = noise_dataset_list
@@ -110,6 +115,7 @@ class Dataset(BaseDataset):
     def _random_select_from(dataset_list):
         return random.choice(dataset_list)
 
+    # 随机拼接噪声和silence到目标长度
     def _select_noise_y(self, target_length):
         noise_y = np.zeros(0, dtype=np.float32)
         silence = np.zeros(int(self.sr * self.silence_length), dtype=np.float32)
@@ -121,7 +127,7 @@ class Dataset(BaseDataset):
             noise_y = np.append(noise_y, noise_new_added)
             remaining_length -= len(noise_new_added)
 
-            # If still need to add new noise, insert a small silence segment firstly
+            # If it is still necessary to add new noise, insert a small silence segment firstly
             if remaining_length > 0:
                 silence_len = min(remaining_length, len(silence))
                 noise_y = np.append(noise_y, silence[:silence_len])
@@ -149,10 +155,11 @@ class Dataset(BaseDataset):
             clean_y: clean signal
             noise_y: noise signal
             snr (int): signal-to-noise ratio
-            target_dB_FS (int): target dBFS
+            target_dB_FS (int): target dBFS, dBFS(dbFullScale) the ratio of the
+            amplitude of a signal to the maximum possible amplitude of a device
             target_dB_FS_floating_value (int): target dBFS floating value
             rir: room impulse response. It can be None or a numpy.ndarray
-            eps: eps
+            eps: eps 全称epsilon，用于避免除零错误
 
         Returns:
             (noisy_y, clean_y)
@@ -161,20 +168,25 @@ class Dataset(BaseDataset):
             if rir.ndim > 1:
                 rir_idx = np.random.randint(0, rir.shape[0])
                 rir = rir[rir_idx, :]
-
             clean_y = signal.fftconvolve(clean_y, rir)[: len(clean_y)]
 
+        # 1. Normalize clean_y and noise_y to the same dBFS
         clean_y, _ = norm_amplitude(clean_y)
         clean_y, _, _ = tailor_dB_FS(clean_y, target_dB_FS)
-        clean_rms = (clean_y**2).mean() ** 0.5
+        clean_rms = (clean_y**2).mean() ** 0.5 # root-mean-square clean speech
 
         noise_y, _ = norm_amplitude(noise_y)
         noise_y, _, _ = tailor_dB_FS(noise_y, target_dB_FS)
         noise_rms = (noise_y**2).mean() ** 0.5
 
-        snr_scalar = clean_rms / (10 ** (snr / 20)) / (noise_rms + eps)
+        # 2. Mix clean_y and noise_y based on a given SNR
+        # snr = 20 * log10(clean_rms / snr_scalar * noise_rms)
+        # so snr_scalar * noise_rms = clean_rms / (10 ** (snr / 20))
+        # snr_scalar = clean_rms / (10 ** (snr / 20)) / noise_rms
+        # snr_scalar用于调整noise_y的音量，使得混合后的音量满足给定的snr
+        snr_scalar = clean_rms / (10 ** (snr / 20)) / (noise_rms + eps) # eps: avoid zero division
         noise_y *= snr_scalar
-        noisy_y = clean_y + noise_y
+        noisy_y = clean_y + noise_y # clean + noise后的音量大于clean，所以后续使用tailor_dB_FS调整音量
 
         # Randomly select RMS value of dBFS between -15 dBFS and -35 dBFS and normalize noisy speech with that value
         noisy_target_dB_FS = np.random.randint(
@@ -184,19 +196,20 @@ class Dataset(BaseDataset):
 
         # Use the same RMS value of dBFS for noisy speech
         noisy_y, _, noisy_scalar = tailor_dB_FS(noisy_y, noisy_target_dB_FS)
-        clean_y *= noisy_scalar
+        clean_y *= noisy_scalar # adjust clean_y to the same dBFS as noisy_y, 保证clean和noisy的音量一致
 
         # The mixed speech is clipped if the RMS value of noisy speech is too large.
-        if is_clipped(noisy_y):
+        if is_clipped(noisy_y): # if noisy_y 中有超过[-1, 1]的值
             noisy_y_scalar = np.max(np.abs(noisy_y)) / (0.99 - eps)
-            noisy_y = noisy_y / noisy_y_scalar
-            clean_y = clean_y / noisy_y_scalar
+            noisy_y = noisy_y / noisy_y_scalar # normalize noisy_y to [-1, 1]
+            clean_y = clean_y / noisy_y_scalar # normalize clean_y to [-1, 1]
 
         return noisy_y, clean_y
 
     def __getitem__(self, item):
         clean_fpath = self.clean_dataset_list[item]
         clean_y = load_wav(clean_fpath, sr=self.sr)
+        # 将clean_y截取成指定长度(sub_sample_length)的音频
         clean_y = subsample(
             clean_y, sub_sample_length=int(self.sub_sample_length * self.sr)
         )
@@ -215,7 +228,7 @@ class Dataset(BaseDataset):
             target_dB_FS_floating_value=self.target_dB_FS_floating_value,
             rir=load_wav(self._random_select_from(self.rir_dataset_list), sr=self.sr)
             if use_reverb
-            else None,
+            else None, #if else指use_reverb为True时给rir赋值，否则给rir赋值None
         )
 
         noisy_y = noisy_y.astype(np.float32)
