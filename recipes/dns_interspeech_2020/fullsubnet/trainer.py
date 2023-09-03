@@ -39,8 +39,6 @@ class Trainer(BaseTrainer):
             else self.train_dataloader
         ):
             self.optimizer.zero_grad()
-            import pdb
-            pdb.set_trace()
             noisy = noisy.to(self.rank) # [B, T]
             clean = clean.to(self.rank) # [B, T]
 

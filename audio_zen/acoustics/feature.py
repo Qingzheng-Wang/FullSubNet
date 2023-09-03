@@ -4,7 +4,7 @@ import librosa
 import numpy as np
 import torch
 import torch.nn as nn
-from torchaudio.transforms import MelSpectrogram
+from torchaudio.transforms import MelSpectrogram, InverseMelScale, GriffinLim, InverseSpectrogram
 
 def stft(y, n_fft, hop_length, win_length):
     """Wrapper of the official torch.stft for single-channel and multichannel.
@@ -53,6 +53,39 @@ def mel(y, sr, n_fft, hop_length, win_length, n_mels, f_min=0., f_max=None):
     transform = MelSpectrogram(sample_rate=sr, n_fft=n_fft, hop_length=hop_length,
                          win_length=win_length, n_mels=n_mels, f_min=f_min, f_max=f_max)
     return transform(y)
+
+def imel_approx(mel_spectrogram, sr, n_fft, n_mels, win_length,
+                hop_length, f_min=0., f_max=None, noisy_phase=None):
+    """
+    inverse mel spectrogram to wav, specifically, mel -> power spec -> wav
+    :return: (B, T)
+    """
+    trans_mel = InverseMelScale(sample_rate=sr, n_stft=n_fft, n_mels=n_mels,
+                                f_min=f_min, f_max=f_max)
+    power_spec = trans_mel(mel_spectrogram)
+    def window_fn():
+        return torch.hann_window(n_fft, device=mel_spectrogram.device)
+    griffin_lim = GriffinLim(n_fft=n_fft, n_iter=32, win_length=win_length,
+                             hop_length=hop_length, window_fn=window_fn)
+    return griffin_lim(power_spec)
+
+def imel_phase(mel_spectrogram, noisy_phase, sr, n_fft, n_mels, win_length,
+                hop_length, f_min=0., f_max=None):
+    """
+    inverse mel spectrogram using noisy phase to wav, specifically, mel -> power spec -> wav
+    :return: (B, T)
+    """
+    trans_to_power = InverseMelScale(sample_rate=sr, n_stft=n_fft, n_mels=n_mels,
+                                f_min=f_min, f_max=f_max)
+    power_spec = trans_to_power(mel_spectrogram)
+    mag_spec = torch.sqrt(power_spec)
+    complex_spec = mag_spec * torch.exp(1j * noisy_phase)
+    def window_fn():
+        return torch.hann_window(n_fft, device=mel_spectrogram.device)
+    trans_to_wav = InverseSpectrogram(n_fft=n_fft, win_length=win_length, hop_length=hop_length,
+                                      window_fn=window_fn)
+    return trans_to_wav(complex_spec)
+
 
 
 def istft(features, n_fft, hop_length, win_length, length=None, input_type="complex"):

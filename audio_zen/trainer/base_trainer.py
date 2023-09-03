@@ -17,7 +17,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.backends import cudnn
 import matplotlib.pyplot as plt
 import audio_zen.metrics as metrics
-from audio_zen.acoustics.feature import istft, stft, mel
+from audio_zen.acoustics.feature import istft, stft, mel, imel_approx, imel_phase
 from audio_zen.acoustics.utils import transform_pesq_range
 from audio_zen.utils import ExecutionTime, prepare_empty_dir
 
@@ -53,7 +53,7 @@ class BaseTrainer:
         win_length = self.acoustic_config["win_length"]
         sr = self.acoustic_config["sr"]
         n_mels = self.acoustic_config["mel"]["n_mels"]
-
+        reconstruction_type = config["trainer"]["validation"]["reconstruction_type"]
 
         # Supported STFT
         # 固定一个函数的部分参数,返回一个新的可调用对象。
@@ -63,6 +63,16 @@ class BaseTrainer:
         self.torch_mel = partial(
             mel, sr=sr, n_fft=n_fft, hop_length=hop_length, win_length=win_length, n_mels=n_mels
         )
+        if reconstruction_type == "approx":
+            self.torch_imel = partial(
+                imel_approx, n_fft=n_fft, n_mels=n_mels, win_length=win_length, hop_length=hop_length
+            )
+        elif reconstruction_type == "phase":
+            self.torch_imel = partial(
+                imel_phase, n_fft=n_fft, n_mels=n_mels, win_length=win_length, hop_length=hop_length
+            )
+        else:
+            raise NotImplementedError(f"{reconstruction_type} is not implemented.")
         self.torch_istft = partial(
             istft, n_fft=n_fft, hop_length=hop_length, win_length=win_length
         )

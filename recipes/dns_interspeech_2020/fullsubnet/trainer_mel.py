@@ -50,16 +50,16 @@ class TrainerMel(BaseTrainer):
         ):
             self.optimizer.zero_grad()
 
-            noisy = noisy.to(self.rank)
+            noisy = noisy.to(self.rank) # [B, T]
             clean = clean.to(self.rank)
 
             noisy_mel = self.torch_mel(noisy) # [B, F, T], F = n_mels
             clean_mel = self.torch_mel(clean)
             with autocast(enabled=self.use_amp):
-                # [B, F, T] => [B, 1, F, T] => model => [B, 2, F, T] => [B, F, T, 2]
+                # [B, F, T] => [B, 1, F, T] => model => [B, 1, F, T] => [B, F, T]
                 noisy_mel = noisy_mel.unsqueeze(1)
                 o = self.model(noisy_mel)
-                o = o.permute(0, 2, 3, 1)
+                o = o.squeeze(1)
                 loss = self.loss_function(clean_mel, o)
 
             # 缩放浮点数精度，减少显存占用
@@ -118,29 +118,18 @@ class TrainerMel(BaseTrainer):
             noisy = noisy.to(self.rank)
             clean = clean.to(self.rank)
 
-            noisy_mag, noisy_phase, noisy_real, noisy_imag = self.torch_stft(noisy)
-            _, _, clean_real, clean_imag = self.torch_stft(clean)
-            cIRM = build_complex_ideal_ratio_mask(
-                noisy_real, noisy_imag, clean_real, clean_imag
-            )  # [B, F, T, 2]
+            _, noisy_phase, _, _ = self.torch_stft(noisy)
+            noisy_mel = self.torch_mel(noisy)  # [B, F, T], F = n_mels
+            clean_mel = self.torch_mel(clean)
+            noisy_mel = noisy_mel.unsqueeze(1)
+            o = self.model(noisy_mel)
+            o = o.squeeze(1)
 
-            noisy_mag = noisy_mag.unsqueeze(1)
-            cRM = self.model(noisy_mag)
-            cRM = cRM.permute(0, 2, 3, 1)
+            loss = self.loss_function(clean_mel, o)
 
-            loss = self.loss_function(cIRM, cRM)
+            enhanced = self.torch_imel(o, noisy_phase=noisy_phase) # reconstructed wav, [B, T]
 
-            cRM = decompress_cIRM(cRM)
-
-            enhanced_real = cRM[..., 0] * noisy_real - cRM[..., 1] * noisy_imag
-            enhanced_imag = cRM[..., 1] * noisy_real + cRM[..., 0] * noisy_imag
-            enhanced = self.torch_istft(
-                (enhanced_real, enhanced_imag),
-                length=noisy.size(-1),
-                input_type="real_imag",
-            )
-
-            noisy = noisy.detach().squeeze(0).cpu().numpy()
+            noisy = noisy.detach().squeeze(0).cpu().numpy() # [B * T]
             clean = clean.detach().squeeze(0).cpu().numpy()
             enhanced = enhanced.detach().squeeze(0).cpu().numpy()
 

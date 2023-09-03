@@ -86,6 +86,10 @@ save_checkpoint_interval = 2
 [trainer.validation]
 save_max_metric_score = true
 validation_interval = 2
+# methods to reconstruct the waveform from the mel-spectrogram,
+# "approx" or "phase", approx(approximation) means Torch.InverseMelScale + Torch.GriffinLim,
+# phase(noisy phase) means Torch.InverseMelScale + noisy phase + Torch.InverseSpectrogram
+reconstruction_type = "approx"
 [trainer.visualization]
 metrics = ["WB_PESQ", "NB_PESQ", "STOI", "SI_SDR"]
 n_samples = 10
