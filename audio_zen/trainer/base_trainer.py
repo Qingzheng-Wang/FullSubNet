@@ -5,7 +5,6 @@ from pathlib import Path
 
 import librosa
 import librosa.display
-import matplotlib.pyplot as plt
 import numpy as np
 import toml
 import torch
@@ -16,13 +15,13 @@ from torch.cuda.amp import GradScaler
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.tensorboard import SummaryWriter
 from torch.backends import cudnn
-
+import matplotlib.pyplot as plt
 import audio_zen.metrics as metrics
-from audio_zen.acoustics.feature import istft, stft
+from audio_zen.acoustics.feature import istft, stft, mel
 from audio_zen.acoustics.utils import transform_pesq_range
 from audio_zen.utils import ExecutionTime, prepare_empty_dir
 
-plt.switch_backend("agg")
+
 console = Console()
 
 
@@ -52,11 +51,17 @@ class BaseTrainer:
         n_fft = self.acoustic_config["n_fft"]
         hop_length = self.acoustic_config["hop_length"]
         win_length = self.acoustic_config["win_length"]
+        sr = self.acoustic_config["sr"]
+        n_mels = self.acoustic_config["mel"]["n_mels"]
+
 
         # Supported STFT
         # 固定一个函数的部分参数,返回一个新的可调用对象。
         self.torch_stft = partial(
             stft, n_fft=n_fft, hop_length=hop_length, win_length=win_length
+        )
+        self.torch_mel = partial(
+            mel, sr=sr, n_fft=n_fft, hop_length=hop_length, win_length=win_length, n_mels=n_mels
         )
         self.torch_istft = partial(
             istft, n_fft=n_fft, hop_length=hop_length, win_length=win_length
@@ -96,7 +101,7 @@ class BaseTrainer:
             / config["meta"]["experiment_name"]
         ) # Path对象可以后面跟/然后加上字符串，这样就可以拼接路径了
         self.checkpoints_dir = self.save_dir / "checkpoints"
-        self.logs_dir = self.save_dir / "logs"
+        self.logs_dir = self.save_dir / f"{time.strftime('%Y-%m-%d-%H-%M')}-logs"
         self.source_code_dir = Path(__file__).expanduser().absolute().parent.parent.parent
 
         if resume:
@@ -267,7 +272,7 @@ class BaseTrainer:
             for param in model.parameters():
                 params_of_network += param.numel()
 
-            print(f"\Model {idx}: {params_of_network / 1e6} million.")
+            print(f"\Model {idx}: {params_of_network / 1e6} million, {4*params_of_network/1024/1024} MB.")
             params_of_all_networks += params_of_network
 
         print(

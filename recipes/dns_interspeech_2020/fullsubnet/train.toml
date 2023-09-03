@@ -10,13 +10,15 @@ n_fft = 512
 win_length = 512
 sr = 16000
 hop_length = 256
+[acoustics.mel]
+n_mels = 128
 
 [loss_function]
 name = "mse_loss"
 [loss_function.args]
 
 [optimizer]
-lr = 0.001
+lr = 0.0001
 beta1 = 0.9
 beta2 = 0.999
 
@@ -45,10 +47,10 @@ target_dB_FS = -25
 target_dB_FS_floating_value = 10
 
 [train_dataset.dataloader]
-batch_size = 4
+batch_size = 32
 num_workers = 16
 drop_last = true
-pin_memory = false
+pin_memory = true
 
 [validation_dataset]
 path = "dataset_validation.Dataset"
@@ -61,12 +63,11 @@ sr = 16000
 
 [model]
 path = "fullsubnet.model.Model"
-
 [model.args]
 sb_num_neighbors = 15
 fb_num_neighbors = 0
 num_freqs = 257
-look_ahead = 2
+look_ahead = 3
 sequence_model = "LSTM"
 fb_output_activate_function = "ReLU"
 sb_output_activate_function = false

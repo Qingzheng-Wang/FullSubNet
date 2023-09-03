@@ -4,13 +4,13 @@ import librosa
 import numpy as np
 import torch
 import torch.nn as nn
-
+from torchaudio.transforms import MelSpectrogram
 
 def stft(y, n_fft, hop_length, win_length):
-    """Wrapper of the official torch.stft for single-channel and multi-channel.
+    """Wrapper of the official torch.stft for single-channel and multichannel.
 
     Args:
-        y: single- or multi-channel speech with shape of [B, C, T] or [B, T]
+        y: single- or multichannel speech with shape of [B, C, T] or [B, T]
         n_fft: number of FFT
         hop_length: hop length
         win_length: hanning window size
@@ -48,6 +48,11 @@ def stft(y, n_fft, hop_length, win_length):
     real = complex_stft.real
     imag = complex_stft.imag
     return mag, phase, real, imag
+
+def mel(y, sr, n_fft, hop_length, win_length, n_mels, f_min=0., f_max=None):
+    transform = MelSpectrogram(sample_rate=sr, n_fft=n_fft, hop_length=hop_length,
+                         win_length=win_length, n_mels=n_mels, f_min=f_min, f_max=f_max)
+    return transform(y)
 
 
 def istft(features, n_fft, hop_length, win_length, length=None, input_type="complex"):
@@ -306,36 +311,40 @@ def batch_shuffle_frequency(tensor, indices=None):
     return out, indices
 
 
-def drop_band(input, num_groups=2):
+def drop_band(x, num_groups=2):
     """Reduce computational complexity of the sub-band part in the FullSubNet model.
 
     Shapes:
         input: [B, C, F, T]
         return: [B, C, F // num_groups, T]
     """
-    batch_size, _, num_freqs, _ = input.shape
+    batch_size, _, num_freqs, _ = x.shape
     assert (
         batch_size > num_groups
     ), f"Batch size = {batch_size}, num_groups = {num_groups}. The batch size should larger than the num_groups."
 
     if num_groups <= 1:
         # No demand for grouping
-        return input
+        return x
 
     # Each sample must has the same number of the frequencies for parallel training.
     # Therefore, we need to drop those remaining frequencies in the high frequency part.
     if num_freqs % num_groups != 0:
-        input = input[..., : (num_freqs - (num_freqs % num_groups)), :]
-        num_freqs = input.shape[2]
+        x = x[..., : (num_freqs - (num_freqs % num_groups)), :]
+        num_freqs = x.shape[2]
 
     output = []
     for group_idx in range(num_groups):
         samples_indices = torch.arange(
-            group_idx, batch_size, num_groups, device=input.device
+            group_idx, batch_size, num_groups, device=x.device
         )
-        freqs_indices = torch.arange(group_idx, num_freqs, num_groups, device=input.device)
+        freqs_indices = torch.arange(
+            group_idx, num_freqs, num_groups, device=x.device
+        )
 
-        selected_samples = torch.index_select(input, dim=0, index=samples_indices)
+        selected_samples = torch.index_select(
+            x, dim=0, index=samples_indices
+        )
         selected = torch.index_select(
             selected_samples, dim=2, index=freqs_indices
         )  # [B, C, F // num_groups, T]

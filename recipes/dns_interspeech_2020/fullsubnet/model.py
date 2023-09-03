@@ -82,57 +82,70 @@ class Model(BaseModel):
             return: [B, 2, F, T]
         """
         assert noisy_mag.dim() == 4
-        noisy_mag = functional.pad(noisy_mag, [0, self.look_ahead])  # Pad the look ahead
+        # LH is the abbreviation of look ahead!!!
+        # [B, C, F, T] => [B, C, F, T + LH]
+        noisy_mag = functional.pad(noisy_mag, [self.look_ahead, 0])  # Pad the look ahead
         batch_size, num_channels, num_freqs, num_frames = noisy_mag.size()
         assert (
             num_channels == 1
         ), f"{self.__class__.__name__} takes the mag feature as inputs."
 
         # Full-band model
+        # [B, C, F, T + LH] => [B, C * F, T + LH]
         fb_input = self.norm(noisy_mag).reshape(
             batch_size, num_channels * num_freqs, num_frames
         )
+
+        # [B, C * F, T + LH]
+        # => INNER{ [B, T + LH, C * F] -> [B, T + LH, C * F] -> [B, C * F, T + LH]}
+        # => [B, C, F, T + LH]
         fb_output = self.fb_model(fb_input).reshape(batch_size, 1, num_freqs, num_frames)
 
-        # Unfold fullband model's output, [B, N=F, C, F_f, T]. N is the number of sub-band units
+        # Unfold fullband model's output
+        # [B, C, F, T + LH] => [B, N=F, C, F_f(1), T + LH]
         fb_output_unfolded = self.freq_unfold(fb_output, num_neighbors=self.fb_num_neighbors)
+        # [B, N=F, C, F_f(1), T + LH] => [B, N=F, F_f(1), T + LH]
         fb_output_unfolded = fb_output_unfolded.reshape(
             batch_size, num_freqs, self.fb_num_neighbors * 2 + 1, num_frames
         )
 
-        # Unfold noisy spectrogram, [B, N=F, C, F_s, T]
+        # Unfold noisy spectrogram
+        # [B, C, F, T + LH] => [B, N=F, C, F_s(2 * neighbors + 1), T + LH]
         noisy_mag_unfolded = self.freq_unfold(noisy_mag, num_neighbors=self.sb_num_neighbors)
+        # [B, N=F, C, F_s(2 * neighbors + 1), T + LH] => [B, N=F, F_s(2 * neighbors + 1), T + LH]
         noisy_mag_unfolded = noisy_mag_unfolded.reshape(
             batch_size, num_freqs, self.sb_num_neighbors * 2 + 1, num_frames
         )
-
-        # Concatenation, [B, F, (F_s + F_f), T]
+        # Concatenation
+        # [B, N = F, (F_s + F_f), T + LH]
         sb_input = torch.cat([noisy_mag_unfolded, fb_output_unfolded], dim=2)
         sb_input = self.norm(sb_input)
 
         # Speeding up training without significant performance degradation.
+        # 降维，将频率维度分组，每组的频率数为F / num_groups，目的是减少计算量
         if batch_size > 1:
             sb_input = drop_band(
                 sb_input.permute(0, 2, 1, 3), num_groups=self.num_groups_in_drop_band
-            )  # [B, (F_s + F_f), F//num_groups, T]
+            )  # [B, (F_s + F_f), F / num_groups, T + LH]
             num_freqs = sb_input.shape[2]
-            sb_input = sb_input.permute(0, 2, 1, 3)  # [B, F//num_groups, (F_s + F_f), T]
+            sb_input = sb_input.permute(0, 2, 1, 3)  # [B, F / num_groups, (F_s + F_f), T + LH]
 
         sb_input = sb_input.reshape(
             batch_size * num_freqs,
             (self.sb_num_neighbors * 2 + 1) + (self.fb_num_neighbors * 2 + 1),
             num_frames,
-        )
+        ) # [B * F / num_groups, (F_s + F_f), T + LH]
 
-        # [B * F, (F_s + F_f), T] => [B * F, 2, T] => [B, F, 2, T]
+        # [B * F / num_groups, (F_s + F_f), T +LH]
+        # => [B * F / num_groups, 2, T + LH]
+        # => [B, 2, F / num_groups, T + LH]
         sb_mask = self.sb_model(sb_input)
         sb_mask = (
             sb_mask.reshape(batch_size, num_freqs, 2, num_frames)
             .permute(0, 2, 1, 3)
             .contiguous()
         )
-
-        output = sb_mask[:, :, :, self.look_ahead :]
+        output = sb_mask[:, :, :, : -self.look_ahead] # [B, 2, F / num_groups, T]
         return output
 
 

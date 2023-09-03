@@ -1,3 +1,13 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*- #
+# ==================================================
+# File Name:        trainer_mel.py
+# Author:           Qingzheng WANG
+# Time:             2023/9/3 21:06
+# Description:                       
+# Function List:    
+# ===================================================
+
 import matplotlib.pyplot as plt
 import torch
 from torch.cuda.amp import autocast
@@ -10,7 +20,7 @@ from audio_zen.trainer.base_trainer import BaseTrainer
 plt.switch_backend("agg")
 
 
-class Trainer(BaseTrainer):
+class TrainerMel(BaseTrainer):
     def __init__(
         self,
         dist,
@@ -39,26 +49,18 @@ class Trainer(BaseTrainer):
             else self.train_dataloader
         ):
             self.optimizer.zero_grad()
-            import pdb
-            pdb.set_trace()
-            noisy = noisy.to(self.rank) # [B, T]
-            clean = clean.to(self.rank) # [B, T]
 
-            noisy_mag, noisy_phase, noisy_real, noisy_imag = self.torch_stft(noisy) # [B, F, T], F = n_fft // 2 + 1
-            _, _, clean_real, clean_imag = self.torch_stft(clean)
-            cIRM = build_complex_ideal_ratio_mask(
-                noisy_real, noisy_imag, clean_real, clean_imag
-            )  # [B, F, T, 2]
-            cIRM = drop_band(
-                cIRM.permute(0, 3, 1, 2),
-                self.model.module.num_groups_in_drop_band,
-            ).permute(0, 2, 3, 1) # [B, F, T, 2]
+            noisy = noisy.to(self.rank)
+            clean = clean.to(self.rank)
+
+            noisy_mel = self.torch_mel(noisy) # [B, F, T], F = n_mels
+            clean_mel = self.torch_mel(clean)
             with autocast(enabled=self.use_amp):
                 # [B, F, T] => [B, 1, F, T] => model => [B, 2, F, T] => [B, F, T, 2]
-                noisy_mag = noisy_mag.unsqueeze(1)
-                cRM = self.model(noisy_mag)
-                cRM = cRM.permute(0, 2, 3, 1)
-                loss = self.loss_function(cIRM, cRM)
+                noisy_mel = noisy_mel.unsqueeze(1)
+                o = self.model(noisy_mel)
+                o = o.permute(0, 2, 3, 1)
+                loss = self.loss_function(clean_mel, o)
 
             # 缩放浮点数精度，减少显存占用
             self.scaler.scale(loss).backward()

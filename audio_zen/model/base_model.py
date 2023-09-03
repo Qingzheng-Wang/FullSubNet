@@ -203,7 +203,7 @@ class BaseModel(nn.Module):
     @staticmethod
     def offline_laplace_norm(input):
         """
-
+        对每个utterance的每个频点求均值，然后归一化，目的是为了消除不同utterance的能量差异
         Args:
             input: [B, C, F, T]
 
