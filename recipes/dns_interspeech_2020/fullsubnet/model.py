@@ -1,6 +1,5 @@
 import torch
 from torch.nn import functional
-
 from audio_zen.acoustics.feature import drop_band
 from audio_zen.model.base_model import BaseModel
 from audio_zen.model.module.sequence_model import SequenceModel
@@ -52,7 +51,7 @@ class Model(BaseModel):
 
         self.sb_model = SequenceModel(
             input_size=(sb_num_neighbors * 2 + 1) + (fb_num_neighbors * 2 + 1),
-            output_size=2,
+            output_size=1,
             hidden_size=sb_model_hidden_size,
             num_layers=2,
             bidirectional=False,
@@ -137,11 +136,11 @@ class Model(BaseModel):
         ) # [B * F / num_groups, (F_s + F_f), T + LH]
 
         # [B * F / num_groups, (F_s + F_f), T +LH]
-        # => [B * F / num_groups, 2, T + LH]
-        # => [B, 2, F / num_groups, T + LH]
+        # => [B * F / num_groups, 1, T + LH]
+        # => [B, 1, F / num_groups, T + LH]
         sb_mask = self.sb_model(sb_input)
         sb_mask = (
-            sb_mask.reshape(batch_size, num_freqs, 2, num_frames)
+            sb_mask.reshape(batch_size, num_freqs, 1, num_frames)
             .permute(0, 2, 1, 3)
             .contiguous()
         )

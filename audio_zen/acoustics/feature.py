@@ -4,7 +4,8 @@ import librosa
 import numpy as np
 import torch
 import torch.nn as nn
-from torchaudio.transforms import MelSpectrogram, InverseMelScale, GriffinLim, InverseSpectrogram
+from torchaudio.transforms import MelSpectrogram, InverseMelScale, GriffinLim, InverseSpectrogram, Spectrogram, MelScale
+from torchaudio import functional as F
 
 def stft(y, n_fft, hop_length, win_length):
     """Wrapper of the official torch.stft for single-channel and multichannel.
@@ -50,9 +51,19 @@ def stft(y, n_fft, hop_length, win_length):
     return mag, phase, real, imag
 
 def mel(y, sr, n_fft, hop_length, win_length, n_mels, f_min=0., f_max=None):
+
+    # spectrogram = Spectrogram(n_fft=n_fft, hop_length=hop_length,
+    #                           win_length=win_length, window_fn=torch.hann_window, wkwargs={'device':y.device})
+    # spectrogram = spectrogram(y)
+    # fb = F.melscale_fbanks(n_fft//2 + 1, f_min=0., f_max=8000., n_mels=n_mels, sample_rate=sr).to(y.device)
+    # mel_spectrogram = torch.matmul(spectrogram.transpose(-1, -2), fb).transpose(-1, -2)
+    # return mel_spectrogram
+
     transform = MelSpectrogram(sample_rate=sr, n_fft=n_fft, hop_length=hop_length,
-                         win_length=win_length, n_mels=n_mels, f_min=f_min, f_max=f_max)
+                               win_length=win_length, n_mels=n_mels, window_fn=torch.hann_window,
+                               f_min=f_min, f_max=f_max, wkwargs={'device':y.device}, mel_scale='slaney').to(y.device)
     return transform(y)
+
 
 def imel_approx(mel_spectrogram, sr, n_fft, n_mels, win_length,
                 hop_length, f_min=0., f_max=None, noisy_phase=None):
@@ -61,12 +72,11 @@ def imel_approx(mel_spectrogram, sr, n_fft, n_mels, win_length,
     :return: (B, T)
     """
     trans_mel = InverseMelScale(sample_rate=sr, n_stft=n_fft, n_mels=n_mels,
-                                f_min=f_min, f_max=f_max)
+                                f_min=f_min, f_max=f_max).to(mel_spectrogram.device)
     power_spec = trans_mel(mel_spectrogram)
-    def window_fn():
-        return torch.hann_window(n_fft, device=mel_spectrogram.device)
     griffin_lim = GriffinLim(n_fft=n_fft, n_iter=32, win_length=win_length,
-                             hop_length=hop_length, window_fn=window_fn)
+                             hop_length=hop_length, window_fn=torch.hann_window,
+                             wkwargs={'device':mel_spectrogram.device}).to(mel_spectrogram.device)
     return griffin_lim(power_spec)
 
 def imel_phase(mel_spectrogram, noisy_phase, sr, n_fft, n_mels, win_length,
@@ -76,14 +86,12 @@ def imel_phase(mel_spectrogram, noisy_phase, sr, n_fft, n_mels, win_length,
     :return: (B, T)
     """
     trans_to_power = InverseMelScale(sample_rate=sr, n_stft=n_fft, n_mels=n_mels,
-                                f_min=f_min, f_max=f_max)
+                                f_min=f_min, f_max=f_max).to(mel_spectrogram.device)
     power_spec = trans_to_power(mel_spectrogram)
     mag_spec = torch.sqrt(power_spec)
     complex_spec = mag_spec * torch.exp(1j * noisy_phase)
-    def window_fn():
-        return torch.hann_window(n_fft, device=mel_spectrogram.device)
     trans_to_wav = InverseSpectrogram(n_fft=n_fft, win_length=win_length, hop_length=hop_length,
-                                      window_fn=window_fn)
+                                      window_fn=torch.hann_window, wkwargs={'device':mel_spectrogram.device}).to(mel_spectrogram.device)
     return trans_to_wav(complex_spec)
 
 

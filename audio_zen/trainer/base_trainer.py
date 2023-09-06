@@ -65,11 +65,11 @@ class BaseTrainer:
         )
         if reconstruction_type == "approx":
             self.torch_imel = partial(
-                imel_approx, n_fft=n_fft, n_mels=n_mels, win_length=win_length, hop_length=hop_length
+                imel_approx, sr=sr, n_fft=n_fft, n_mels=n_mels, win_length=win_length, hop_length=hop_length
             )
         elif reconstruction_type == "phase":
             self.torch_imel = partial(
-                imel_phase, n_fft=n_fft, n_mels=n_mels, win_length=win_length, hop_length=hop_length
+                imel_phase, sr=sr, n_fft=n_fft, n_mels=n_mels, win_length=win_length, hop_length=hop_length
             )
         else:
             raise NotImplementedError(f"{reconstruction_type} is not implemented.")
