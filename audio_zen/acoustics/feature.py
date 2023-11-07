@@ -71,8 +71,10 @@ def imel_approx(mel_spectrogram, sr, n_fft, n_mels, win_length,
     inverse mel spectrogram to wav, specifically, mel -> power spec -> wav
     :return: (B, T)
     """
-    trans_mel = InverseMelScale(sample_rate=sr, n_stft=n_fft, n_mels=n_mels,
+    trans_mel = InverseMelScale(sample_rate=sr, n_stft=n_fft // 2 + 1, n_mels=n_mels,
                                 f_min=f_min, f_max=f_max).to(mel_spectrogram.device)
+    print(mel_spectrogram.requires_grad)
+    mel_spectrogram.requires_grad = False
     power_spec = trans_mel(mel_spectrogram)
     griffin_lim = GriffinLim(n_fft=n_fft, n_iter=32, win_length=win_length,
                              hop_length=hop_length, window_fn=torch.hann_window,
@@ -85,8 +87,10 @@ def imel_phase(mel_spectrogram, noisy_phase, sr, n_fft, n_mels, win_length,
     inverse mel spectrogram using noisy phase to wav, specifically, mel -> power spec -> wav
     :return: (B, T)
     """
-    trans_to_power = InverseMelScale(sample_rate=sr, n_stft=n_fft, n_mels=n_mels,
+    trans_to_power = InverseMelScale(sample_rate=sr, n_stft=n_fft // 2 + 1, n_mels=n_mels,
                                 f_min=f_min, f_max=f_max).to(mel_spectrogram.device)
+    print(mel_spectrogram.requires_grad)
+    mel_spectrogram.requires_grad = False
     power_spec = trans_to_power(mel_spectrogram)
     mag_spec = torch.sqrt(power_spec)
     complex_spec = mag_spec * torch.exp(1j * noisy_phase)

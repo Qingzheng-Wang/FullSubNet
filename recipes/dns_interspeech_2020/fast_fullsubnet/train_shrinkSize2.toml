@@ -18,7 +18,7 @@ name = "mse_loss"
 
 
 [optimizer]
-lr = 0.001
+lr = 0.0001
 beta1 = 0.9
 beta2 = 0.999
 
@@ -26,10 +26,10 @@ beta2 = 0.999
 [train_dataset]
 path = "dataset_train.Dataset"
 [train_dataset.args]
-clean_dataset = "~/data/DNS-Challenge-INTERSPEECH/datasets/clean_0.6.txt"
+clean_dataset = "~/Datasets/DNS-Challenge/datasets/clean_0.6.txt"
 clean_dataset_limit = false
 clean_dataset_offset = 0
-noise_dataset = "~/data/DNS-Challenge-INTERSPEECH/datasets/noise.txt"
+noise_dataset = "~/Datasets/DNS-Challenge/datasets/noise.txt"
 noise_dataset_limit = false
 noise_dataset_offset = 0
 num_workers = 36
@@ -37,7 +37,7 @@ pre_load_clean_dataset = false
 pre_load_noise = false
 pre_load_rir = false
 reverb_proportion = 0.75
-rir_dataset = "~/data/DNS-Challenge-INTERSPEECH/datasets/rir.txt"
+rir_dataset = "~/Datasets/DNS-Challenge/datasets/rir.txt"
 rir_dataset_limit = false
 rir_dataset_offset = 0
 silence_length = 0.2
@@ -49,7 +49,7 @@ target_dB_FS_floating_value = 10
 
 
 [train_dataset.dataloader]
-batch_size = 72
+batch_size = 16
 num_workers = 48
 drop_last = true
 pin_memory = false
@@ -59,8 +59,8 @@ pin_memory = false
 path = "dataset_validation.Dataset"
 [validation_dataset.args]
 dataset_dir_list = [
-    "~/data/DNS-Challenge-INTERSPEECH/datasets/test_set/synthetic/with_reverb/",
-    "~/data/DNS-Challenge-INTERSPEECH/datasets/test_set/synthetic/no_reverb/"
+    "~/Datasets/DNS-Challenge/datasets/test_set/synthetic/with_reverb/",
+    "~/Datasets/DNS-Challenge/datasets/test_set/synthetic/no_reverb/"
 ]
 sr = 16000
 
@@ -68,8 +68,8 @@ sr = 16000
 [model]
 path = "fast_fullsubnet.model.Model"
 [model.args]
-look_ahead = 2
-shrink_size = 2
+look_ahead = 3
+shrink_size = 1
 sequence_model = "LSTM"
 encoder_input_size = 257
 num_mels = 64
@@ -87,7 +87,7 @@ epochs = 9999
 save_checkpoint_interval = 2
 [trainer.validation]
 save_max_metric_score = true
-validation_interval = 2
+validation_interval = 1
 [trainer.visualization]
 metrics = ["WB_PESQ", "NB_PESQ", "STOI", "SI_SDR"]
 n_samples = 10

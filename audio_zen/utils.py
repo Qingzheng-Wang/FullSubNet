@@ -38,12 +38,12 @@ def prepare_empty_dir(dirs, resume=False):
         resume (bool): whether to resume experiment, default is False
     """
     for dir_path in dirs:
-        if resume:
-            assert (
-                dir_path.exists()
-            ), "In resume mode, you must be have an old experiment dir."
-        else:
-            dir_path.mkdir(parents=True, exist_ok=True)
+        # if resume:
+        #     assert (
+        #         dir_path.exists()
+        #     ), "In resume mode, you must be have an old experiment dir."
+        # else:
+        dir_path.mkdir(parents=True, exist_ok=True)
 
 
 def check_nan(tensor, key=""):

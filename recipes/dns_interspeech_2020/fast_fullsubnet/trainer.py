@@ -2,6 +2,8 @@ import matplotlib.pyplot as plt
 import torch
 from torch.cuda.amp import autocast
 from tqdm import tqdm
+from torch.nn import functional
+import torchaudio as audio
 
 from audio_zen.acoustics.mask import build_complex_ideal_ratio_mask, decompress_cIRM
 from audio_zen.trainer.base_trainer import BaseTrainer
@@ -28,10 +30,11 @@ class Trainer(BaseTrainer):
         )
         self.train_dataloader = train_dataloader
         self.valid_dataloader = validation_dataloader
+        self.model = model
+        self.mel_scale = self.model.mel_scale
 
     def _train_epoch(self, epoch):
         loss_total = 0.0
-
         for noisy, clean in (
             tqdm(self.train_dataloader, desc="Training")
             if self.rank == 0
@@ -43,17 +46,27 @@ class Trainer(BaseTrainer):
             clean = clean.to(self.rank)
 
             noisy_mag, noisy_phase, noisy_real, noisy_imag = self.torch_stft(noisy)
+            noisy_mel_real = self.mel_scale(noisy_real)
+            noisy_mel_imag = self.mel_scale(noisy_imag)
             _, _, clean_real, clean_imag = self.torch_stft(clean)
-            cIRM = build_complex_ideal_ratio_mask(
+            clean_mel_real = self.mel_scale(clean_real)
+            clean_mel_imag = self.mel_scale(clean_imag)
+            cIRM_f = build_complex_ideal_ratio_mask(
                 noisy_real, noisy_imag, clean_real, clean_imag
             )  # [B, F, T, 2]
+            cIRM_c = build_complex_ideal_ratio_mask(
+                noisy_mel_real, noisy_mel_imag, clean_mel_real, clean_mel_imag
+            )  # [B, F, T, 2]
+            cIRM_c = cIRM_c[:, :, :-self.model.look_ahead, :]
+            cIRM_c = functional.pad(cIRM_c, [0, 0, self.model.look_ahead, 0])
 
             with autocast(enabled=self.use_amp):
                 # [B, F, T] => [B, 1, F, T] => model => [B, 2, F, T] => [B, F, T, 2]
                 noisy_mag = noisy_mag.unsqueeze(1)
-                cRM = self.model(noisy_mag)
-                cRM = cRM.permute(0, 2, 3, 1)
-                loss = self.loss_function(cIRM, cRM)
+                cRM_f, cRM_c = self.model(noisy_mag)  # [B, 2, F, T]
+                cRM_f = cRM_f.permute(0, 2, 3, 1)  # [B, F, T, 2]
+                cRM_c = cRM_c.permute(0, 2, 3, 1)  # [B, F, T, 2]
+                loss = 0.5 * self.loss_function(cIRM_f, cRM_f) + 0.5 * self.loss_function(cIRM_c, cRM_c)
 
             self.scaler.scale(loss).backward()
             self.scaler.unscale_(self.optimizer)
@@ -111,21 +124,33 @@ class Trainer(BaseTrainer):
             clean = clean.to(self.rank)
 
             noisy_mag, noisy_phase, noisy_real, noisy_imag = self.torch_stft(noisy)
+            noisy_mel_real = self.mel_scale(noisy_real)
+            noisy_mel_imag = self.mel_scale(noisy_imag)
             _, _, clean_real, clean_imag = self.torch_stft(clean)
-            cIRM = build_complex_ideal_ratio_mask(
+            clean_mel_real = self.mel_scale(clean_real)
+            clean_mel_imag = self.mel_scale(clean_imag)
+            cIRM_f = build_complex_ideal_ratio_mask(
                 noisy_real, noisy_imag, clean_real, clean_imag
             )  # [B, F, T, 2]
+            cIRM_c = build_complex_ideal_ratio_mask(
+                noisy_mel_real, noisy_mel_imag, clean_mel_real, clean_mel_imag
+            )  # [B, F, T, 2]
+            cIRM_c = cIRM_c[:, :, :-self.model.look_ahead, :]
+            cIRM_c = functional.pad(cIRM_c, [0, 0, self.model.look_ahead, 0])
 
+            import pdb
+            pdb.set_trace()
             noisy_mag = noisy_mag.unsqueeze(1)
-            cRM = self.model(noisy_mag)
-            cRM = cRM.permute(0, 2, 3, 1)
+            cRM_f, cRM_c = self.model(noisy_mag)
+            cRM_f = cRM_f.permute(0, 2, 3, 1)
+            cRM_c = cRM_c.permute(0, 2, 3, 1)  # [B, F, T, 2]
 
-            loss = self.loss_function(cIRM, cRM)
+            loss = 0.5 * self.loss_function(cIRM_f, cRM_f) + 0.5 * self.loss_function(cIRM_c, cRM_c)
 
-            cRM = decompress_cIRM(cRM)
+            cRM_f = decompress_cIRM(cRM_f)
 
-            enhanced_real = cRM[..., 0] * noisy_real - cRM[..., 1] * noisy_imag
-            enhanced_imag = cRM[..., 1] * noisy_real + cRM[..., 0] * noisy_imag
+            enhanced_real = cRM_f[..., 0] * noisy_real - cRM_f[..., 1] * noisy_imag
+            enhanced_imag = cRM_f[..., 1] * noisy_real + cRM_f[..., 0] * noisy_imag
             enhanced = self.torch_istft(
                 (enhanced_real, enhanced_imag),
                 length=noisy.size(-1),

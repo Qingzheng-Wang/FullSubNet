@@ -127,7 +127,6 @@ class Trainer(BaseTrainer):
             loss = self.loss_function(cIRM, cRM)
 
             cRM = decompress_cIRM(cRM)
-
             enhanced_real = cRM[..., 0] * noisy_real - cRM[..., 1] * noisy_imag
             enhanced_imag = cRM[..., 1] * noisy_real + cRM[..., 0] * noisy_imag
             enhanced = self.torch_istft(

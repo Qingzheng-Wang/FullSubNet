@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
 import torchaudio as audio
-from torch.nn import functional
-from torchinfo import summary
+from torch.nn import functional, Linear
 
 from audio_zen.model.base_model import BaseModel
 from audio_zen.model.module.sequence_model import SequenceModel
@@ -65,7 +64,7 @@ class Model(BaseModel):
         # S
         self.bottleneck = SequenceModel(
             input_size=(noisy_input_num_neighbors * 2 + 1) + (encoder_output_num_neighbors * 2 + 1),
-            output_size=1,
+            output_size=2,
             hidden_size=bottleneck_hidden_size,
             num_layers=bottleneck_num_layers,
             bidirectional=False,
@@ -102,6 +101,11 @@ class Model(BaseModel):
         self.enc_output_num_neighbors = encoder_output_num_neighbors
         self.norm = self.norm_wrapper(norm_type)
 
+        self.num_frames = 193 + self.look_ahead
+        # predict the future frames according to the enhanced current frames
+        # c2f is current to future
+        self.linear_c2f = Linear(3 * 64 * self.num_frames, 2 * 64 * self.num_frames)
+
         if weight_init:
             self.apply(self.weight_init)
 
@@ -116,13 +120,13 @@ class Model(BaseModel):
         """
         first_block = input[..., 0:1]  # [B, C, F, 1]
         block_list = torch.split(input[..., 1:], self.shrink_size, dim=-1)  # ([B, C, F, shrink_size], [B, C, F, shrink_size], ...)
-        last_block = block_list[-1]  # [B, C, F, T]
+        last_block = block_list[-1]  # [B, C, F, shrink_size]
 
         output = torch.cat(
             (
-                first_block,  # [B, C, F, 1]
-                torch.mean(torch.stack(block_list[:-1], dim=-1), dim=-2),  # [B, C, F, T]
-                torch.mean(last_block, dim=-1, keepdim=True)  # [B, C, F, 1]
+                first_block,
+                torch.mean(torch.stack(block_list[:-1], dim=-1), dim=-2),
+                torch.mean(last_block, dim=-1, keepdim=True)
             ), dim=-1
         )  # [B, C, F, T // shrink_size]
 
@@ -158,7 +162,7 @@ class Model(BaseModel):
             F_s - sub-band frequency
         """
         assert mix_mag.dim() == 4
-        mix_mag = functional.pad(mix_mag, [0, self.look_ahead])  # Pad the look ahead
+        mix_mag = functional.pad(mix_mag, [self.look_ahead, 0])  # Pad the look ahead
         batch_size, num_channels, num_freqs, num_frames = mix_mag.size()
         assert num_channels == 1, f"{self.__class__.__name__} takes a magnitude feature as the input."
 
@@ -186,20 +190,31 @@ class Model(BaseModel):
         bn_input_shrink = self.real_time_downsampling(bn_input)  # [B, F_mel, F_sub_1 + F_sub_2, T // shrink_size]
         bn_input_shrink = self.norm(bn_input_shrink)  # [B, F_mel, F_sub_1 + F_sub_2, T // shrink_size]
         bn_input_shrink = bn_input_shrink.reshape(batch_size * self.num_mels, num_sb_unit_freqs, -1)  # [B * F_mel, F_sub_1 + F_sub_2, T // shrink_size]
-        bn_output_shrink = self.bottleneck(bn_input_shrink)  # [B * F_mel, 1, T // shrink_size]
-        bn_output_shrink = bn_output_shrink.reshape(batch_size, self.num_mels, 1, -1).permute(0, 2, 1, 3)  # [B, 1, F_mel, T // shrink_size]
-        bn_output = self.real_time_upsampling(bn_output_shrink, target_len=num_frames)  # [B, 1, F_mel, T]
+        bn_output_shrink = self.bottleneck(bn_input_shrink)  # [B * F_mel, 2, T // shrink_size]
+        bn_output_shrink = bn_output_shrink.reshape(batch_size, self.num_mels, 2, -1).permute(0, 2, 1, 3)  # [B, 2, F_mel, T // shrink_size]
+        bn_output = self.real_time_upsampling(bn_output_shrink, target_len=num_frames)  # [B, 2, F_mel, T]
+
+        output_c = bn_output[:, :, :, :num_frames-self.look_ahead]
+
+        bn_output = bn_output[:, 0, :, :] + bn_output[:, 1, :, :] # [B, F_mel, T], 相加为了concat时更好地跟之前的帧匹配
+        bn_output = bn_output.reshape(batch_size, 1, num_freqs_mel, num_frames)  # [B, 1, F_mel, T]
+        bn_output_cct1 = functional.pad(bn_output[:, :, :, 1:], [1, 0])  # [B, 1, F_mel, T]
+        bn_output_cct2 = functional.pad(bn_output[:, :, :, 2:], [2, 0])  # [B, 1, F_mel, T]
+        bn_output = torch.cat([bn_output, bn_output_cct1, bn_output_cct2], dim=1)  # [B, 3, F_mel, T]
+
+        # Linear, current to future
+        bn_output = self.linear_c2f(bn_output.reshape(batch_size, -1))  # [B, 2 * F_mel * T]
+        bn_output = bn_output.reshape(batch_size, 2, num_freqs_mel, num_frames)  # [B, 2, F_mel, T]
 
         # F_ml2
-        dec_input = torch.cat([enc_output, bn_output], dim=2)
-        dec_input = dec_input.reshape(batch_size, -1, num_frames)
-        decoder_lstm_output = self.decoder_lstm(dec_input)  # [B * C, F * 2, T]
+        dec_input = bn_output.reshape(batch_size, 2 * num_freqs_mel, num_frames) # [B, 2 * F_mel, T]
+        decoder_lstm_output = self.decoder_lstm(dec_input)  # [B, F * 2, T]
         dec_output = decoder_lstm_output.reshape(batch_size, 2, num_freqs, num_frames)
 
         # Output
-        output = dec_output[:, :, :, self.look_ahead:]
+        output_f = dec_output[:, :, :, :num_frames-self.look_ahead]
 
-        return output
+        return output_f, output_c # predicted future frame, enhanced current frame
 
 # fmt: on
 if __name__ == "__main__":
@@ -222,4 +237,4 @@ if __name__ == "__main__":
         output = model(noisy_mag)
         end = time.time()
         print(end - start)
-        summary(model, (1, 1, 257, 63), device="cpu")
+        # summary(model, (1, 1, 257, 63), device="cpu")

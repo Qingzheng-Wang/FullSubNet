@@ -52,27 +52,26 @@ class BaseTrainer:
         hop_length = self.acoustic_config["hop_length"]
         win_length = self.acoustic_config["win_length"]
         sr = self.acoustic_config["sr"]
-        n_mels = self.acoustic_config["mel"]["n_mels"]
-        reconstruction_type = config["trainer"]["validation"]["reconstruction_type"]
+        # reconstruction_type = config["trainer"]["validation"]["reconstruction_type"]
 
         # Supported STFT
         # 固定一个函数的部分参数,返回一个新的可调用对象。
         self.torch_stft = partial(
             stft, n_fft=n_fft, hop_length=hop_length, win_length=win_length
         )
-        self.torch_mel = partial(
-            mel, sr=sr, n_fft=n_fft, hop_length=hop_length, win_length=win_length, n_mels=n_mels
-        )
-        if reconstruction_type == "approx":
-            self.torch_imel = partial(
-                imel_approx, sr=sr, n_fft=n_fft, n_mels=n_mels, win_length=win_length, hop_length=hop_length
-            )
-        elif reconstruction_type == "phase":
-            self.torch_imel = partial(
-                imel_phase, sr=sr, n_fft=n_fft, n_mels=n_mels, win_length=win_length, hop_length=hop_length
-            )
-        else:
-            raise NotImplementedError(f"{reconstruction_type} is not implemented.")
+        # self.torch_mel = partial(
+        #     mel, sr=sr, n_fft=n_fft, hop_length=hop_length, win_length=win_length, n_mels=n_mels
+        # )
+        # if reconstruction_type == "approx":
+        #     self.torch_imel = partial(
+        #         imel_approx, sr=sr, n_fft=n_fft, n_mels=n_mels, win_length=win_length, hop_length=hop_length
+        #     )
+        # elif reconstruction_type == "phase":
+        #     self.torch_imel = partial(
+        #         imel_phase, sr=sr, n_fft=n_fft, n_mels=n_mels, win_length=win_length, hop_length=hop_length
+        #     )
+        # else:
+        #     raise NotImplementedError(f"{reconstruction_type} is not implemented.")
         self.torch_istft = partial(
             istft, n_fft=n_fft, hop_length=hop_length, win_length=win_length
         )
