@@ -95,8 +95,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "-R",
         "--resume",
-        action="store_true",
-        help="Resume the experiment from latest checkpoint.",
+        type=str,
+        help="Resume from given checkpoint dir",
     )
     parser.add_argument(
         "-V",

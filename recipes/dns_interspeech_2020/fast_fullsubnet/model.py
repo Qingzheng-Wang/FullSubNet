@@ -64,9 +64,19 @@ class Model(BaseModel):
         # S
         self.bottleneck = SequenceModel(
             input_size=(noisy_input_num_neighbors * 2 + 1) + (encoder_output_num_neighbors * 2 + 1),
-            output_size=2,
+            output_size=1,
             hidden_size=bottleneck_hidden_size,
             num_layers=bottleneck_num_layers,
+            bidirectional=False,
+            sequence_model=sequence_model,
+            output_activate_function="ReLU"
+        )
+
+        self.pred = SequenceModel(
+            input_size=2 * num_mels,
+            output_size=2 * num_mels,
+            hidden_size=2 * num_mels,
+            num_layers=1,
             bidirectional=False,
             sequence_model=sequence_model,
             output_activate_function="ReLU"
@@ -86,7 +96,7 @@ class Model(BaseModel):
             SequenceModel(
                 input_size=512,
                 hidden_size=512,
-                output_size=257 * 2,
+                output_size=257 * 1,
                 num_layers=1,
                 bidirectional=False,
                 sequence_model=sequence_model,
@@ -101,10 +111,9 @@ class Model(BaseModel):
         self.enc_output_num_neighbors = encoder_output_num_neighbors
         self.norm = self.norm_wrapper(norm_type)
 
-        self.num_frames = 193 + self.look_ahead
         # predict the future frames according to the enhanced current frames
         # c2f is current to future
-        self.linear_c2f = Linear(3 * 64 * self.num_frames, 2 * 64 * self.num_frames)
+        self.linear_c2f = Linear(6 * 64 , 2 * 64)
 
         if weight_init:
             self.apply(self.weight_init)
@@ -169,10 +178,11 @@ class Model(BaseModel):
         # Mel filtering
         mix_mel_mag = self.mel_scale(mix_mag)  # [B, C, F_mel, T]
         _, _, num_freqs_mel, _ = mix_mel_mag.shape
+        mix_mel_mag = torch.pow(mix_mel_mag, 1 / 3)
 
         # F_l2m
         enc_input = self.norm(mix_mel_mag).reshape(batch_size, -1, num_frames)
-        enc_output = self.encoder(enc_input).reshape(batch_size, num_channels, -1, num_frames)  # [B, C, F, T]
+        enc_output = self.encoder(enc_input).reshape(batch_size, num_channels, -1, num_frames)  # [B, C, F_mel, T]
 
         # Unfold - noisy spectrogram, [B, N=F, C, F_s, T]
         mix_mel_unfold_mag = self.freq_unfold(mix_mel_mag, num_neighbors=self.noisy_input_num_neighbors)  # [B, F_mel, C, F_sub, T]
@@ -191,25 +201,29 @@ class Model(BaseModel):
         bn_input_shrink = self.norm(bn_input_shrink)  # [B, F_mel, F_sub_1 + F_sub_2, T // shrink_size]
         bn_input_shrink = bn_input_shrink.reshape(batch_size * self.num_mels, num_sb_unit_freqs, -1)  # [B * F_mel, F_sub_1 + F_sub_2, T // shrink_size]
         bn_output_shrink = self.bottleneck(bn_input_shrink)  # [B * F_mel, 2, T // shrink_size]
-        bn_output_shrink = bn_output_shrink.reshape(batch_size, self.num_mels, 2, -1).permute(0, 2, 1, 3)  # [B, 2, F_mel, T // shrink_size]
+        bn_output_shrink = bn_output_shrink.reshape(batch_size, self.num_mels, 1, num_frames).permute(0, 2, 1, 3)  # [B, 2, F_mel, T // shrink_size]
         bn_output = self.real_time_upsampling(bn_output_shrink, target_len=num_frames)  # [B, 2, F_mel, T]
+        bn_output = torch.cat([bn_output, enc_output], dim=1)  # [B, 2, F_mel, T]
 
-        output_c = bn_output[:, :, :, :num_frames-self.look_ahead]
+        output_c = bn_output
+        output_c = self.decoder_lstm(output_c.reshape(batch_size, 2 * num_freqs_mel, num_frames))  # [B, F * 2, T]
+        output_c = output_c.reshape(batch_size, 1, num_freqs, num_frames)
+        output_c = output_c[:, :, :, :num_frames-self.look_ahead]
 
-        bn_output = bn_output[:, 0, :, :] + bn_output[:, 1, :, :] # [B, F_mel, T], 相加为了concat时更好地跟之前的帧匹配
-        bn_output = bn_output.reshape(batch_size, 1, num_freqs_mel, num_frames)  # [B, 1, F_mel, T]
-        bn_output_cct1 = functional.pad(bn_output[:, :, :, 1:], [1, 0])  # [B, 1, F_mel, T]
-        bn_output_cct2 = functional.pad(bn_output[:, :, :, 2:], [2, 0])  # [B, 1, F_mel, T]
-        bn_output = torch.cat([bn_output, bn_output_cct1, bn_output_cct2], dim=1)  # [B, 3, F_mel, T]
+        # bn_output = bn_output[:, 0, :, :] + bn_output[:, 1, :, :] # [B, F_mel, T], 相加为了concat时更好地跟之前的帧匹配
+        # bn_output = bn_output.reshape(batch_size, 1, num_freqs_mel, num_frames)  # [B, 1, F_mel, T]
+        # bn_output_cct1 = functional.pad(bn_output[:, :, :, 1:], [1, 0])  # [B, 1, F_mel, T]
+        # bn_output_cct2 = functional.pad(bn_output[:, :, :, 2:], [2, 0])  # [B, 1, F_mel, T]
+        # bn_output = torch.cat([bn_output, bn_output_cct1, bn_output_cct2], dim=1)  # [B, 4, F_mel, T]
 
-        # Linear, current to future
-        bn_output = self.linear_c2f(bn_output.reshape(batch_size, -1))  # [B, 2 * F_mel * T]
+        # current to future
+        bn_output = self.pred(bn_output.reshape(batch_size, -1, num_frames))  # [B, 2 * F_mel, T]
         bn_output = bn_output.reshape(batch_size, 2, num_freqs_mel, num_frames)  # [B, 2, F_mel, T]
 
         # F_ml2
         dec_input = bn_output.reshape(batch_size, 2 * num_freqs_mel, num_frames) # [B, 2 * F_mel, T]
-        decoder_lstm_output = self.decoder_lstm(dec_input)  # [B, F * 2, T]
-        dec_output = decoder_lstm_output.reshape(batch_size, 2, num_freqs, num_frames)
+        decoder_lstm_output = self.decoder_lstm(dec_input)  # [B, F * 1, T]
+        dec_output = decoder_lstm_output.reshape(batch_size, 1, num_freqs, num_frames)
 
         # Output
         output_f = dec_output[:, :, :, :num_frames-self.look_ahead]

@@ -1,6 +1,6 @@
 [meta]
 save_dir = "~/Experiments/Fast_FullSubNet/"
-description = "This is a description of FullSubNet experiment."
+description = "mapping style, cubic mel input model, cubic stft as target"
 seed = 0 # set random seed for random, numpy, pytorch-gpu and pytorch-cpu
 use_amp = true
 cudnn_enable = false
@@ -14,6 +14,7 @@ hop_length = 256
 
 [loss_function]
 name = "mse_loss"
+f = 0.5
 [loss_function.args]
 
 
@@ -49,7 +50,7 @@ target_dB_FS_floating_value = 10
 
 
 [train_dataset.dataloader]
-batch_size = 16
+batch_size = 64
 num_workers = 48
 drop_last = true
 pin_memory = false
@@ -68,7 +69,7 @@ sr = 16000
 [model]
 path = "fast_fullsubnet.model.Model"
 [model.args]
-look_ahead = 3
+look_ahead = 0
 shrink_size = 1
 sequence_model = "LSTM"
 encoder_input_size = 257
@@ -87,7 +88,7 @@ epochs = 9999
 save_checkpoint_interval = 2
 [trainer.validation]
 save_max_metric_score = true
-validation_interval = 1
+validation_interval = 2
 [trainer.visualization]
 metrics = ["WB_PESQ", "NB_PESQ", "STOI", "SI_SDR"]
 n_samples = 10

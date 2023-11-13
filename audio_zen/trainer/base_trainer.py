@@ -109,9 +109,17 @@ class BaseTrainer:
             Path(config["meta"]["save_dir"]).expanduser().absolute()
             / config["meta"]["experiment_name"]
         ) # Path对象可以后面跟/然后加上字符串，这样就可以拼接路径了
-        self.checkpoints_dir = self.save_dir / "checkpoints"
-        self.logs_dir = self.save_dir / f"{time.strftime('%Y-%m-%d-%H-%M')}-logs"
+        self.checkpoints_dir = self.save_dir / f"{time.strftime('%Y-%m-%d-%H-%M-%S')}-checkpoints"
+        self.logs_dir = self.save_dir / f"{time.strftime('%Y-%m-%d-%H-%M-%S')}-logs"
+        print(self.logs_dir)
         self.source_code_dir = Path(__file__).expanduser().absolute().parent.parent.parent
+
+        # 判断resume是否为str类型
+        if isinstance(resume, str):
+            self.resume_dir = Path(resume).expanduser().absolute()
+            resume = self.resume_dir.is_dir()
+        else:
+            resume = False
 
         if resume:
             self._resume_checkpoint()
@@ -176,8 +184,11 @@ class BaseTrainer:
         """
         Resume the experiment from the latest checkpoint.
         """
+        # latest_model_path = (
+        #     self.checkpoints_dir.expanduser().absolute() / "latest_model.tar"
+        # )
         latest_model_path = (
-            self.checkpoints_dir.expanduser().absolute() / "latest_model.tar"
+                self.resume_dir / "latest_model.tar"
         )
         assert (
             latest_model_path.exists()
@@ -246,7 +257,7 @@ class BaseTrainer:
         # Contains only model.
         torch.save(
             state_dict["model"],
-            (self.checkpoints_dir / f"model_{str(epoch).zfill(4)}.pth").as_posix(),
+            (self.checkpoints_dir / f"model_epoch_{str(epoch).zfill(3)}.pth").as_posix(),
         )
 
         # If the model get a best metric score (means "is_best_epoch=True") in the current epoch,

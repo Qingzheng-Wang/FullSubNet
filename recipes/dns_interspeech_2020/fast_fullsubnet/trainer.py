@@ -32,9 +32,12 @@ class Trainer(BaseTrainer):
         self.valid_dataloader = validation_dataloader
         self.model = model
         self.mel_scale = self.model.mel_scale
+        self.f = config["loss_function"]["f"]
 
     def _train_epoch(self, epoch):
         loss_total = 0.0
+        loss_f_total = 0.0
+        loss_c_total = 0.0
         for noisy, clean in (
             tqdm(self.train_dataloader, desc="Training")
             if self.rank == 0
@@ -46,27 +49,25 @@ class Trainer(BaseTrainer):
             clean = clean.to(self.rank)
 
             noisy_mag, noisy_phase, noisy_real, noisy_imag = self.torch_stft(noisy)
-            noisy_mel_real = self.mel_scale(noisy_real)
-            noisy_mel_imag = self.mel_scale(noisy_imag)
-            _, _, clean_real, clean_imag = self.torch_stft(clean)
-            clean_mel_real = self.mel_scale(clean_real)
-            clean_mel_imag = self.mel_scale(clean_imag)
-            cIRM_f = build_complex_ideal_ratio_mask(
-                noisy_real, noisy_imag, clean_real, clean_imag
-            )  # [B, F, T, 2]
-            cIRM_c = build_complex_ideal_ratio_mask(
-                noisy_mel_real, noisy_mel_imag, clean_mel_real, clean_mel_imag
-            )  # [B, F, T, 2]
-            cIRM_c = cIRM_c[:, :, :-self.model.look_ahead, :]
-            cIRM_c = functional.pad(cIRM_c, [0, 0, self.model.look_ahead, 0])
+            clean_mag, clean_phase, clean_real, clean_imag = self.torch_stft(clean)
+            clean_mag = clean_mag.unsqueeze(3) # [B, F, T, 1]
+            cbrt_f = torch.pow(clean_mag, 1 / 3) # cubic root of clean mag as the future target
+            if not self.model.look_ahead == 0:
+                clean_mag = clean_mag[:, :, :-self.model.look_ahead, :]
+            clean_mag = functional.pad(clean_mag, [0, 0, self.model.look_ahead, 0])
+            cbrt_c = torch.pow(clean_mag, 1 / 3) # cubic root of clean mag as the current target
+
 
             with autocast(enabled=self.use_amp):
-                # [B, F, T] => [B, 1, F, T] => model => [B, 2, F, T] => [B, F, T, 2]
+                # [B, F, T] => [B, 1, F, T] => model => [B, 1, F, T] => [B, F, T, 1]
                 noisy_mag = noisy_mag.unsqueeze(1)
-                cRM_f, cRM_c = self.model(noisy_mag)  # [B, 2, F, T]
-                cRM_f = cRM_f.permute(0, 2, 3, 1)  # [B, F, T, 2]
-                cRM_c = cRM_c.permute(0, 2, 3, 1)  # [B, F, T, 2]
-                loss = 0.5 * self.loss_function(cIRM_f, cRM_f) + 0.5 * self.loss_function(cIRM_c, cRM_c)
+                pred_f, pred_c = self.model(noisy_mag)  # [B, 1, F, T]
+                pred_f = pred_f.permute(0, 2, 3, 1)  # [B, F, T, 1]
+                pred_c = pred_c.permute(0, 2, 3, 1)  # [B, F, T, 1]
+
+                loss = self.f * self.loss_function(cbrt_f, pred_f) + (1 - self.f) * self.loss_function(cbrt_c, pred_c)
+                loss_f = self.f * self.loss_function(cbrt_f, pred_f)
+                loss_c = (1 - self.f) * self.loss_function(cbrt_c, pred_c)
 
             self.scaler.scale(loss).backward()
             self.scaler.unscale_(self.optimizer)
@@ -77,10 +78,18 @@ class Trainer(BaseTrainer):
             self.scaler.update()
 
             loss_total += loss.item()
+            loss_f_total += loss_f.item()
+            loss_c_total += loss_c.item()
 
         if self.rank == 0:
             self.writer.add_scalar(
                 f"Loss/Train", loss_total / len(self.train_dataloader), epoch
+            )
+            self.writer.add_scalar(
+                f"Loss/Train_f", loss_f_total / len(self.train_dataloader), epoch
+            )
+            self.writer.add_scalar(
+                f"Loss/Train_c", loss_c_total / len(self.train_dataloader), epoch
             )
 
     @torch.no_grad()
@@ -124,37 +133,32 @@ class Trainer(BaseTrainer):
             clean = clean.to(self.rank)
 
             noisy_mag, noisy_phase, noisy_real, noisy_imag = self.torch_stft(noisy)
-            noisy_mel_real = self.mel_scale(noisy_real)
-            noisy_mel_imag = self.mel_scale(noisy_imag)
-            _, _, clean_real, clean_imag = self.torch_stft(clean)
-            clean_mel_real = self.mel_scale(clean_real)
-            clean_mel_imag = self.mel_scale(clean_imag)
-            cIRM_f = build_complex_ideal_ratio_mask(
-                noisy_real, noisy_imag, clean_real, clean_imag
-            )  # [B, F, T, 2]
-            cIRM_c = build_complex_ideal_ratio_mask(
-                noisy_mel_real, noisy_mel_imag, clean_mel_real, clean_mel_imag
-            )  # [B, F, T, 2]
-            cIRM_c = cIRM_c[:, :, :-self.model.look_ahead, :]
-            cIRM_c = functional.pad(cIRM_c, [0, 0, self.model.look_ahead, 0])
+            clean_mag, clean_phase, clean_real, clean_imag = self.torch_stft(clean)
+            clean_mag = clean_mag.unsqueeze(3) # [B, F, T, 1]
+            cbrt_f = torch.pow(clean_mag, 1 / 3) # cubic root of clean mag as the future target
+            if not self.model.look_ahead == 0:
+                clean_mag = clean_mag[:, :, :-self.model.look_ahead, :]
+            clean_mag = functional.pad(clean_mag, [0, 0, self.model.look_ahead, 0])
+            cbrt_c = torch.pow(clean_mag, 1 / 3) # cubic root of clean mag as the current target
 
-            import pdb
-            pdb.set_trace()
             noisy_mag = noisy_mag.unsqueeze(1)
-            cRM_f, cRM_c = self.model(noisy_mag)
-            cRM_f = cRM_f.permute(0, 2, 3, 1)
-            cRM_c = cRM_c.permute(0, 2, 3, 1)  # [B, F, T, 2]
+            pred_f, pred_c = self.model(noisy_mag)
+            pred_f = pred_f.permute(0, 2, 3, 1)
+            pred_c = pred_c.permute(0, 2, 3, 1)  # [B, F, T, 1]
 
-            loss = 0.5 * self.loss_function(cIRM_f, cRM_f) + 0.5 * self.loss_function(cIRM_c, cRM_c)
+            loss = self.f * self.loss_function(cbrt_f, pred_f) + (1 - self.f) * self.loss_function(cbrt_c, pred_c)
 
-            cRM_f = decompress_cIRM(cRM_f)
+            pred_f = pred_f.squeeze(3)
+            pred_f = torch.pow(pred_f, 3)
+            pred_c = pred_c.squeeze(3)
+            pred_c = torch.pow(pred_c, 3)
+            pred_f_complex = pred_f * torch.exp(1j * noisy_phase)
+            pred_c_complex = pred_c * torch.exp(1j * noisy_phase)
 
-            enhanced_real = cRM_f[..., 0] * noisy_real - cRM_f[..., 1] * noisy_imag
-            enhanced_imag = cRM_f[..., 1] * noisy_real + cRM_f[..., 0] * noisy_imag
             enhanced = self.torch_istft(
-                (enhanced_real, enhanced_imag),
+                (pred_f, noisy_phase),
                 length=noisy.size(-1),
-                input_type="real_imag",
+                input_type="mag_phase",
             )
 
             noisy = noisy.detach().squeeze(0).cpu().numpy()
