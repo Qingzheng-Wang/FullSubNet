@@ -43,8 +43,6 @@ class Trainer(BaseTrainer):
             if self.rank == 0
             else self.train_dataloader
         ):
-            import pdb
-            pdb.set_trace()
             self.optimizer.zero_grad()
 
             noisy = noisy.to(self.rank)
@@ -105,6 +103,14 @@ class Trainer(BaseTrainer):
             "With_reverb": 0.0,
             "No_reverb": 0.0,
         }
+        loss_list_c = {
+            "With_reverb": 0.0,
+            "No_reverb": 0.0,
+        }
+        loss_list_f = {
+            "With_reverb": 0.0,
+            "No_reverb": 0.0,
+        }
         item_idx_list = {
             "With_reverb": 0,
             "No_reverb": 0,
@@ -149,6 +155,8 @@ class Trainer(BaseTrainer):
             pred_c = pred_c.permute(0, 2, 3, 1)  # [B, F, T, 1]
 
             loss = self.f * self.loss_function(cbrt_f, pred_f) + (1 - self.f) * self.loss_function(cbrt_c, pred_c)
+            loss_f = self.f * self.loss_function(cbrt_f, pred_f)
+            loss_c = (1 - self.f) * self.loss_function(cbrt_c, pred_c)
 
             pred_f = pred_f.squeeze(3)
             pred_f = torch.pow(pred_f, 3)
@@ -172,6 +180,8 @@ class Trainer(BaseTrainer):
 
             # Separated loss
             loss_list[speech_type] += loss
+            loss_list_c[speech_type] += loss_c
+            loss_list_f[speech_type] += loss_f
             item_idx_list[speech_type] += 1
 
             if item_idx_list[speech_type] <= visualization_n_samples:
@@ -191,6 +201,16 @@ class Trainer(BaseTrainer):
             self.writer.add_scalar(
                 f"Loss/{speech_type}",
                 loss_list[speech_type] / len(self.valid_dataloader),
+                epoch,
+            )
+            self.writer.add_scalar(
+                f"Loss_c/{speech_type}",
+                loss_list_c[speech_type] / len(self.valid_dataloader),
+                epoch,
+            )
+            self.writer.add_scalar(
+                f"Loss_f/{speech_type}",
+                loss_list_f[speech_type] / len(self.valid_dataloader),
                 epoch,
             )
 

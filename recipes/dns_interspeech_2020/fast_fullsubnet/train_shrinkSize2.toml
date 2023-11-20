@@ -51,7 +51,7 @@ target_dB_FS_floating_value = 10
 
 
 [train_dataset.dataloader]
-batch_size = 16
+batch_size = 64
 num_workers = 48
 drop_last = true
 pin_memory = false

@@ -176,8 +176,6 @@ class Model(BaseModel):
         assert num_channels == 1, f"{self.__class__.__name__} takes a magnitude feature as the input."
 
         # Mel filtering
-        import pdb
-        pdb.set_trace()
         mix_mag = torch.pow(mix_mag, 2)
         mix_mel_mag = self.mel_scale(mix_mag)  # [B, C, F_mel, T]
         _, _, num_freqs_mel, _ = mix_mel_mag.shape
@@ -207,15 +205,9 @@ class Model(BaseModel):
         bn_output = torch.cat([bn_output, enc_output], dim=1)  # [B, 2, F_mel, T]
 
         output_c = bn_output
-        output_c = self.decoder_lstm(output_c.reshape(batch_size, 2 * num_freqs_mel, num_frames))  # [B, F_mel * 2, T]
+        output_c = self.decoder_lstm(output_c.reshape(batch_size, 2 * num_freqs_mel, num_frames))  # [B, F_mel * 1, T]
         output_c = output_c.reshape(batch_size, 1, num_freqs, num_frames)
         output_c = output_c[:, :, :, :num_frames-self.look_ahead]
-
-        # bn_output = bn_output[:, 0, :, :] + bn_output[:, 1, :, :] # [B, F_mel, T], 相加为了concat时更好地跟之前的帧匹配
-        # bn_output = bn_output.reshape(batch_size, 1, num_freqs_mel, num_frames)  # [B, 1, F_mel, T]
-        # bn_output_cct1 = functional.pad(bn_output[:, :, :, 1:], [1, 0])  # [B, 1, F_mel, T]
-        # bn_output_cct2 = functional.pad(bn_output[:, :, :, 2:], [2, 0])  # [B, 1, F_mel, T]
-        # bn_output = torch.cat([bn_output, bn_output_cct1, bn_output_cct2], dim=1)  # [B, 4, F_mel, T]
 
         # current to future
         bn_output = self.pred(bn_output.reshape(batch_size, -1, num_frames))  # [B, 2 * F_mel, T]
