@@ -176,6 +176,9 @@ class Model(BaseModel):
         assert num_channels == 1, f"{self.__class__.__name__} takes a magnitude feature as the input."
 
         # Mel filtering
+        import pdb
+        pdb.set_trace()
+        mix_mag = torch.pow(mix_mag, 2)
         mix_mel_mag = self.mel_scale(mix_mag)  # [B, C, F_mel, T]
         _, _, num_freqs_mel, _ = mix_mel_mag.shape
         mix_mel_mag = torch.pow(mix_mel_mag, 1 / 3)
@@ -196,17 +199,15 @@ class Model(BaseModel):
         bn_input = torch.cat([mix_mel_unfold_mag, enc_output_unfold_mel], dim=2)
         num_sb_unit_freqs = bn_input.shape[2]
 
-        # Bottleneck - time downsampling
-        bn_input_shrink = self.real_time_downsampling(bn_input)  # [B, F_mel, F_sub_1 + F_sub_2, T // shrink_size]
-        bn_input_shrink = self.norm(bn_input_shrink)  # [B, F_mel, F_sub_1 + F_sub_2, T // shrink_size]
-        bn_input_shrink = bn_input_shrink.reshape(batch_size * self.num_mels, num_sb_unit_freqs, -1)  # [B * F_mel, F_sub_1 + F_sub_2, T // shrink_size]
-        bn_output_shrink = self.bottleneck(bn_input_shrink)  # [B * F_mel, 2, T // shrink_size]
-        bn_output_shrink = bn_output_shrink.reshape(batch_size, self.num_mels, 1, num_frames).permute(0, 2, 1, 3)  # [B, 2, F_mel, T // shrink_size]
-        bn_output = self.real_time_upsampling(bn_output_shrink, target_len=num_frames)  # [B, 2, F_mel, T]
+        bn_input = bn_input.reshape(batch_size * self.num_mels, num_sb_unit_freqs, num_frames)  # [B * F_mel, F_sub_1 + F_sub_2, T]
+        bn_output = self.bottleneck(bn_input)  # [B * F_mel, 1, T]
+        bn_output = bn_output.reshape(batch_size, self.num_mels, 1, num_frames).permute(0, 2, 1, 3)  # [B, 1, F_mel, T]
+
+        # Fuse full-band and sub-band model output
         bn_output = torch.cat([bn_output, enc_output], dim=1)  # [B, 2, F_mel, T]
 
         output_c = bn_output
-        output_c = self.decoder_lstm(output_c.reshape(batch_size, 2 * num_freqs_mel, num_frames))  # [B, F * 2, T]
+        output_c = self.decoder_lstm(output_c.reshape(batch_size, 2 * num_freqs_mel, num_frames))  # [B, F_mel * 2, T]
         output_c = output_c.reshape(batch_size, 1, num_freqs, num_frames)
         output_c = output_c[:, :, :, :num_frames-self.look_ahead]
 

@@ -43,6 +43,8 @@ class Trainer(BaseTrainer):
             if self.rank == 0
             else self.train_dataloader
         ):
+            import pdb
+            pdb.set_trace()
             self.optimizer.zero_grad()
 
             noisy = noisy.to(self.rank)

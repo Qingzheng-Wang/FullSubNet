@@ -7,7 +7,8 @@ hop_length = 256
 
 [inferencer]
 path = "inferencer.Inferencer"
-type = "full_band_crm_mask"
+type = "cubic_root_mag"
+pred_clean = true
 
 [inferencer.args]
 n_neighbor = 15
@@ -18,8 +19,9 @@ path = "dataset_inference.Dataset"
 
 [dataset.args]
 dataset_dir_list = [
-    "~/data/DNS-Challenge-INTERSPEECH/datasets/test_set/synthetic/no_reverb/noisy",
-    # "~/data/DNS-Challenge-INTERSPEECH/datasets/test_set/synthetic/with_reverb/noisy",
+#    "~/Datasets/DNS-Challenge/datasets/test_set/synthetic/no_reverb/noisy",
+##     "~/Datasets/DNS-Challenge/datasets/test_set/synthetic/with_reverb/noisy",
+    "~/Datasets/DNS-Challenge/datasets/test_set/synthetic/no_reverb/clean/"
 ]
 sr = 16000
 
@@ -27,8 +29,8 @@ sr = 16000
 [model]
 path = "fast_fullsubnet.model.Model"
 [model.args]
-look_ahead = 2
-shrink_size = 2
+look_ahead = 0
+shrink_size = 1
 sequence_model = "LSTM"
 encoder_input_size = 257
 num_mels = 64

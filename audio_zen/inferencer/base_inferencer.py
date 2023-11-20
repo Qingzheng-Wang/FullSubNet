@@ -26,7 +26,10 @@ class BaseInferencer:
         self.model, epoch = self._load_model(config["model"], checkpoint_path, self.device)
         self.inference_config = config["inferencer"]
 
-        self.enhanced_dir = root_dir / f"enhanced_{str(epoch).zfill(4)}"
+        if not self.inference_config["pred_clean"]:
+            self.enhanced_dir = root_dir / f"enhanced_epoch_{str(epoch).zfill(4)}"
+        else:
+            self.enhanced_dir = root_dir / f"pred_clean_epoch_{str(epoch).zfill(4)}"
         self.noisy_dir = root_dir / f"noisy"
 
         # self.enhanced_dir = root_dir

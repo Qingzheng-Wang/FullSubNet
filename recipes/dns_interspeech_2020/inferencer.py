@@ -70,6 +70,21 @@ class Inferencer(BaseInferencer):
         return enhanced
 
     @torch.no_grad()
+    def cubic_root_mag(self, noisy, inference_args):
+        noisy_mag, noisy_phase, _, _ = self.torch_stft(noisy)
+        noisy_mag = noisy_mag.unsqueeze(1)
+        cbrt_noisy_mag = torch.pow(noisy_mag, 1 / 3)
+        pred_f, pred_c = self.model(cbrt_noisy_mag)
+        pred_f = pred_f.squeeze(1)
+        pred_f = torch.pow(pred_f, 3)
+        pred_f = self.torch_istft(
+            (pred_f, noisy_phase), length=noisy.size(-1), input_type="mag_phase"
+        )
+        pred_f = pred_f.detach().squeeze(0).cpu().numpy()
+
+        return pred_f
+
+    @torch.no_grad()
     def scaled_mask(self, noisy, inference_args):
         noisy_complex = self.torch_stft(noisy)
         noisy_mag, noisy_phase = mag_phase(noisy_complex)

@@ -4,6 +4,7 @@ description = "mapping style, cubic mel input model, cubic stft as target"
 seed = 0 # set random seed for random, numpy, pytorch-gpu and pytorch-cpu
 use_amp = true
 cudnn_enable = false
+preloaded_model_path = "/mnt/inspurfs/home/wangqingzheng/Experiments/Fast_FullSubNet/train_shrinkSize2/2023-11-13-14-49-07-checkpoints/best_model.tar"
 
 [acoustics]
 n_fft = 512
@@ -50,7 +51,7 @@ target_dB_FS_floating_value = 10
 
 
 [train_dataset.dataloader]
-batch_size = 64
+batch_size = 16
 num_workers = 48
 drop_last = true
 pin_memory = false
@@ -60,6 +61,7 @@ pin_memory = false
 path = "dataset_validation.Dataset"
 [validation_dataset.args]
 dataset_dir_list = [
+#    "~/Datasets/DNS-Challenge/datasets/test_set/clean/"
     "~/Datasets/DNS-Challenge/datasets/test_set/synthetic/with_reverb/",
     "~/Datasets/DNS-Challenge/datasets/test_set/synthetic/no_reverb/"
 ]
