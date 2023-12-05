@@ -137,7 +137,7 @@ class Model(BaseModel):
             output_activate_function="ReLU"
         )
 
-        self.upred = UPred()
+        self.upred = UPred(in_channels=2, out_channels=2)
 
         self.shrink_size = shrink_size
         self.look_ahead = look_ahead
@@ -272,7 +272,10 @@ class Model(BaseModel):
         output_c = output_c[:, :, :, :num_frames-self.look_ahead]
 
         # ==========current to future==========
-        bn_output = self.pred(bn_output.reshape(batch_size, -1, num_frames))  # [B, 2 * F_mel, T]
+        # bn_output = self.pred(bn_output.reshape(batch_size, -1, num_frames))  # [B, 2 * F_mel, T]
+
+        bn_output = bn_output.permute(0, 1, 3, 2)
+        bn_output = self.upred(bn_output).permute(0, 1, 3, 2) # [B, 2, F_mel, T]
         # # ----------pred_full_band----------
         # full_pred_input = bn_output_prev.permute(0, 3, 1, 2) # [B, 1, F_mel, T]
         # full_pred_input = full_pred_input.reshape(batch_size, -1, num_frames) # [B, F_mel, T]
@@ -287,7 +290,6 @@ class Model(BaseModel):
         # sub_pred_output = self.sub_pred(sub_pred_input).reshape(batch_size, self.num_mels, -1, num_frames).permute(0, 2, 1, 3)  # [B, 1, F_mel, T]
         # # ----------Fm2l-------------------
         # f_m2l_input = torch.cat([full_pred_output, sub_pred_output], dim=1)
-
         bn_output = bn_output.reshape(batch_size, 2, num_freqs_mel, num_frames)  # [B, 2, F_mel, T]
 
         # F_ml2
