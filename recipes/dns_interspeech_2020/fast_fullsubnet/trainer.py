@@ -33,6 +33,14 @@ class Trainer(BaseTrainer):
         self.model = model
         self.mel_scale = self.model.mel_scale
         self.f = config["loss_function"]["f"]
+        self.mel_scale = audio.transforms.MelScale(
+            n_mels=self.model.num_mels,
+            sample_rate=16000,
+            f_min=0,
+            f_max=8000,
+            n_stft=self.model.encoder_input_size,
+        )
+        self.mel_scale.to(self.rank)
 
     def _train_epoch(self, epoch):
         loss_total = 0.0
@@ -56,12 +64,15 @@ class Trainer(BaseTrainer):
                 clean_mag = clean_mag[:, :, :-self.model.look_ahead, :]
             clean_mag = functional.pad(clean_mag, [0, 0, self.model.look_ahead, 0])
             cbrt_c = torch.pow(clean_mag, 1 / 3) # cubic root of clean mag as the current target
+            clean_mag = torch.pow(clean_mag, 2)
+            clean_mel = self.mel_scale(clean_mag.squeeze(3)).unsqueeze(3) # [B, F_mel, T, 1]
+            clean_mel = torch.pow(clean_mel, 1 / 3)
 
 
-            with autocast(enabled=self.use_amp):
+            with (autocast(enabled=self.use_amp)):
                 # [B, F, T] => [B, 1, F, T] => model => [B, 1, F, T] => [B, F, T, 1]
                 noisy_mag = noisy_mag.unsqueeze(1)
-                pred_f, pred_c = self.model(noisy_mag)  # [B, 1, F, T]
+                pred_f, pred_c, pred_mel_c = self.model(noisy_mag)  # [B, 1, F, T]
                 pred_f = pred_f.permute(0, 2, 3, 1)  # [B, F, T, 1]
                 pred_c = pred_c.permute(0, 2, 3, 1)  # [B, F, T, 1]
 
@@ -148,9 +159,12 @@ class Trainer(BaseTrainer):
                 clean_mag = clean_mag[:, :, :-self.model.look_ahead, :]
             clean_mag = functional.pad(clean_mag, [0, 0, self.model.look_ahead, 0])
             cbrt_c = torch.pow(clean_mag, 1 / 3) # cubic root of clean mag as the current target
+            clean_mag = torch.pow(clean_mag, 2)
+            clean_mel = self.mel_scale(clean_mag.squeeze(3)).unsqueeze(3) # [B, F_mel, T, 1]
+            clean_mel = torch.pow(clean_mel, 1 / 3)
 
             noisy_mag = noisy_mag.unsqueeze(1)
-            pred_f, pred_c = self.model(noisy_mag)
+            pred_f, pred_c, pred_mel_c = self.model(noisy_mag)
             pred_f = pred_f.permute(0, 2, 3, 1)
             pred_c = pred_c.permute(0, 2, 3, 1)  # [B, F, T, 1]
 

@@ -20,7 +20,7 @@ f = 0.5
 
 
 [optimizer]
-lr = 0.0001
+lr = 0.0005
 beta1 = 0.9
 beta2 = 0.999
 
@@ -51,7 +51,7 @@ target_dB_FS_floating_value = 10
 
 
 [train_dataset.dataloader]
-batch_size = 64
+batch_size = 64   
 num_workers = 48
 drop_last = true
 pin_memory = false
@@ -71,7 +71,7 @@ sr = 16000
 [model]
 path = "fast_fullsubnet.model.Model"
 [model.args]
-look_ahead = 0
+look_ahead = 2
 shrink_size = 1
 sequence_model = "LSTM"
 encoder_input_size = 257
